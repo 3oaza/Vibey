@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Vibey",
+  "version": "1.2",
+  "description": "Collect images from the web and arrange them on the Vibey canvas.",
+  "icons": {
+    "128": "logo-icon128.png",
+    "48":  "logo-icon48.png",
+    "16":  "logo-icon16.png"
+  },
+
+  "action": {
+    "default_title": "Vibey",
+    "default_icon": "logo-icon128.png",
+    "default_popup": "popup.html"
+  },
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["canvas.html"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "permissions": [
+    "storage",
+    "notifications",
+    "contextMenus",
+    "tabs"
+  ]
+}
