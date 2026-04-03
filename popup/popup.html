@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Vibey</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+
+<body>
+  <div class="outer">
+    <div class="card">
+
+      <!-- Header -->
+      <div class="header">
+        <div class="header-text">
+          <span class="popup-logo"><img src="../assets/icons/Vector.svg" alt="Vibey logo"></span>
+          <p class="label">Vibey</p>
+          <h1 class="title">Queue</h1>
+        </div>
+        <button class="open-canvas-btn" id="openCanvasBtn">Open Canvas</button>
+      </div>
+
+      <!-- Image Grid -->
+      <div class="image-grid" id="imageGrid">
+        <!-- Images injected by popup.js -->
+      </div>
+
+      <!-- Empty state -->
+      <div class="empty-state" id="emptyState">
+        <p>No images in queue yet.</p>
+        <p class="empty-sub">Right-click any image to add it.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="../src/popup.js"></script>
+</body>
+
+</html>
