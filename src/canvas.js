@@ -420,6 +420,7 @@
       makeResizable(el);
       selectElement(el.id);
       updateLayersPanel();
+      pushHistory();
       return el;
     }
 
@@ -463,6 +464,7 @@
       UI.elements.appendChild(groupEl);
       makeDraggable(groupEl);
       selectElement(groupEl.id);
+      pushHistory();
       showToast('Items grouped.');
     }
 
@@ -553,7 +555,7 @@
            }
            UI.pctx.clearRect(0, 0, UI.preview.width, UI.preview.height);
         }
-        state.isDrawing = false; saveDrawing();
+        state.isDrawing = false; saveDrawing(); pushHistory();
       }
       if (state.isPanning) { state.isPanning = false; panSession = null; UI.board.classList.remove('panning'); }
     });
@@ -617,18 +619,117 @@
       if (!target) return;
       if (direction === 'front') UI.elements.appendChild(target);
       else if (direction === 'back') UI.elements.prepend(target);
-      syncElementStack(); updateLayersPanel();
+      syncElementStack(); updateLayersPanel(); pushHistory();
     }
 
     function bindLayersPanelEvents() {
        // Panel events handled via inline onclick for simplicity in this version
     }
 
+    function closeAllPanels(exceptId) {
+      document.querySelectorAll('.side-panel.visible').forEach(p => {
+        if (p.id !== exceptId) p.classList.remove('visible');
+      });
+      document.querySelectorAll('.modal-menu.visible').forEach(m => {
+        if (m.id !== exceptId) m.classList.remove('visible');
+      });
+    }
+
+    // ── Undo / Redo history (DOM + drawing snapshots) ──
+    let historyStack = [];
+    let historyIndex = -1;
+    let isRestoringHistory = false;
+    function snapshotBoard() {
+      return { html: UI.elements.innerHTML, drawing: drawingDataURL };
+    }
+    function pushHistory() {
+      if (isRestoringHistory) return;
+      historyStack = historyStack.slice(0, historyIndex + 1);
+      historyStack.push(snapshotBoard());
+      if (historyStack.length > 50) historyStack.shift();
+      historyIndex = historyStack.length - 1;
+    }
+    function restoreSnapshot(snap) {
+      isRestoringHistory = true;
+      try {
+        UI.elements.innerHTML = snap.html || '';
+        drawingDataURL = snap.drawing || null;
+        const ctx = UI.ctx;
+        ctx.clearRect(0, 0, UI.canvas.width, UI.canvas.height);
+        if (drawingDataURL) {
+          const img = new Image();
+          img.onload = () => ctx.drawImage(img, 0, 0);
+          img.src = drawingDataURL;
+        }
+        UI.elements.querySelectorAll('.board-item').forEach(el => {
+          makeDraggable(el);
+          makeResizable(el);
+        });
+        syncElementStack();
+        selectElement(null);
+      } finally {
+        isRestoringHistory = false;
+      }
+    }
+    function undo() {
+      if (historyIndex <= 0) { showToast('Nothing to undo'); return; }
+      historyIndex--;
+      restoreSnapshot(historyStack[historyIndex]);
+      showToast('Undone');
+    }
+    function redo() {
+      if (historyIndex >= historyStack.length - 1) { showToast('Nothing to redo'); return; }
+      historyIndex++;
+      restoreSnapshot(historyStack[historyIndex]);
+      showToast('Redone');
+    }
+    function deleteSelected() {
+      if (!state.selectedIds.length) return;
+      state.selectedIds.forEach(id => document.getElementById(id)?.remove());
+      selectElement(null);
+      pushHistory();
+    }
+    function duplicateSelected() {
+      const ids = state.selectedIds.length ? [...state.selectedIds] : (state.selectedId ? [state.selectedId] : []);
+      if (!ids.length) { showToast('Select an item to duplicate (Ctrl+D)'); return; }
+      const newIds = [];
+      ids.forEach(id => {
+        const t = document.getElementById(id);
+        if (!t) return;
+        const c = t.cloneNode(true);
+        const nid = 'el-' + createId();
+        c.id = nid;
+        c.style.left = ((parseFloat(t.style.left) || 0) + 24) + 'px';
+        c.style.top = ((parseFloat(t.style.top) || 0) + 24) + 'px';
+        c.classList.remove('selected');
+        UI.elements.appendChild(c);
+        syncElementStack();
+        makeDraggable(c);
+        makeResizable(c);
+        newIds.push(nid);
+      });
+      if (newIds.length) {
+        selectElement(null);
+        selectElement(newIds[newIds.length - 1]);
+        state.selectedIds = newIds;
+        state.selectedId = newIds[newIds.length - 1];
+        updateLayersPanel();
+        pushHistory();
+        showToast('Duplicated');
+      }
+    }
+    function setDrawShape(shape) {
+      state.drawShape = shape;
+      if (state.tool !== 'draw') updateTool('draw');
+      document.querySelectorAll('[data-shape]').forEach(b => b.classList.toggle('active', b.dataset.shape === shape));
+      showToast(shape === 'pen' ? 'Pen tool (P)' : shape === 'rect' ? 'Rectangle (R)' : shape === 'circle' ? 'Circle (C)' : shape);
+    }
+
     // Header Actions
     document.getElementById('menuBtn').onclick = () => { closeAllPanels('menuPanel'); document.getElementById('menuPanel').classList.toggle('visible'); };
     document.getElementById('shareBtn').onclick = (e) => { document.getElementById('shareMenu').classList.toggle('visible'); e.stopPropagation(); };
     document.getElementById('shareCopyLink').onclick = () => { navigator.clipboard.writeText(window.location.href); showToast('Link copied!'); };
-    document.getElementById('shareClearBoard').onclick = () => { if (confirm('Clear board?')) { UI.elements.innerHTML = ''; selectElement(null); updateLayersPanel(); } };
+    document.getElementById('shareClearBoard').onclick = () => { if (confirm('Clear board?')) { UI.elements.innerHTML = ''; selectElement(null); updateLayersPanel(); pushHistory(); } };
 
     // --- REFINED EXPORT ENGINE ---
     function downloadDataUrl(filename, dataUrl) {
@@ -1082,8 +1183,8 @@
     // Header Actions & Settings
     document.getElementById('canvasTitle').onblur = (e) => { state.title = e.target.innerText; document.title = `Vibey - ${state.title}`; };
     document.getElementById('resetZoomBtn').onclick = () => { state.targetZoom = 1.0; state.targetPanX = 0; state.targetPanY = 0; queueTransformRender(); };
-    document.getElementById('clearDrawBtn').onclick = () => { if(confirm('Clear all drawing?')) { UI.ctx.clearRect(0,0,UI.canvas.width,UI.canvas.height); saveDrawing(); } };
-    document.getElementById('deleteSelectedBtn').onclick = () => { state.selectedIds.forEach(id => document.getElementById(id)?.remove()); selectElement(null); };
+    document.getElementById('clearDrawBtn').onclick = () => { if(confirm('Clear all drawing?')) { UI.ctx.clearRect(0,0,UI.canvas.width,UI.canvas.height); saveDrawing(); pushHistory(); } };
+    document.getElementById('deleteSelectedBtn').onclick = () => deleteSelected();
     
     document.getElementById('globalOpacityRange').oninput = (e) => {
       const val = parseInt(e.target.value);
@@ -1105,17 +1206,17 @@
       if (!state.selectedId) return;
       const el = document.getElementById(state.selectedId);
       if (el.nextElementSibling) el.parentNode.insertBefore(el.nextElementSibling, el);
-      syncElementStack(); updateLayersPanel();
+      syncElementStack(); updateLayersPanel(); pushHistory();
     };
     document.getElementById('layerMoveDownBtn').onclick = () => {
       if (!state.selectedId) return;
       const el = document.getElementById(state.selectedId);
       if (el.previousElementSibling) el.parentNode.insertBefore(el, el.previousElementSibling);
-      syncElementStack(); updateLayersPanel();
+      syncElementStack(); updateLayersPanel(); pushHistory();
     };
 
     // Menu Panel
-    document.getElementById('menuClearBtn').onclick = () => { if(confirm('Clear entire board?')) { UI.elements.innerHTML = ''; selectElement(null); updateLayersPanel(); } };
+    document.getElementById('menuClearBtn').onclick = () => { if(confirm('Clear entire board?')) { UI.elements.innerHTML = ''; selectElement(null); updateLayersPanel(); pushHistory(); } };
 
     // Toolbar logic
     document.getElementById('imageToolBtn').onclick = () => document.getElementById('fileInput').click();
@@ -1129,21 +1230,49 @@
     };
     document.getElementById('toggleQueueBtn').onclick = () => document.getElementById('queuePanel').classList.toggle('visible');
     document.getElementById('toggleLayersBtn').onclick = () => document.getElementById('layersPanel').classList.toggle('visible');
-    document.getElementById('duplicateBtn').onclick = () => {
-      if (!state.selectedId) return;
-      const t = document.getElementById(state.selectedId);
-      const c = t.cloneNode(true);
-      const nid = 'el-' + createId(); c.id = nid;
-      UI.elements.appendChild(c); syncElementStack(); makeDraggable(c); selectElement(nid);
-    };
+    document.getElementById('duplicateBtn').onclick = () => duplicateSelected();
 
-    // Keyboard
+    // Keyboard shortcuts — V/D/T/I/Q/L/S/P/R/C, Delete, Escape, Ctrl+Z/Y/D/G
+    function isTypingTarget(el) {
+      if (!el) return false;
+      if (el.closest) {
+        return !!el.closest('input, textarea, select, [contenteditable="true"]');
+      }
+      return el.contentEditable === 'true';
+    }
     document.addEventListener('keydown', e => {
-      if (e.target.contentEditable === 'true') return;
-      if (e.key === 'v') updateTool('select');
-      if (e.key === 'd') updateTool('draw');
+      const typing = isTypingTarget(e.target);
+      const mod = e.ctrlKey || e.metaKey;
+      // Ctrl/Cmd combos work everywhere except native text undo
+      if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey && !typing) { e.preventDefault(); undo(); return; }
+      if (((mod && e.key.toLowerCase() === 'y') || (mod && e.shiftKey && e.key.toLowerCase() === 'z')) && !typing) { e.preventDefault(); redo(); return; }
+      if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected(); return; }
+      if (mod && e.key.toLowerCase() === 'g') { e.preventDefault(); createGroup(); return; }
+      if (mod && e.key.toLowerCase() === 'p') { e.preventDefault(); toggleCommandPalette(); return; }
+      if (typing) {
+        if (e.key === 'Escape') e.target.blur();
+        return;
+      }
+      if (mod || e.altKey) return;
+      state.lastKeyDown = e.key.toLowerCase();
+      const k = e.key.toLowerCase();
+      if (k === 'v') updateTool('select');
+      else if (k === 'd') updateTool('draw');
+      else if (k === 't') updateTool('text');
+      else if (k === 'i') document.getElementById('fileInput')?.click();
+      else if (k === 'q') document.getElementById('queuePanel')?.classList.toggle('visible');
+      else if (k === 'l') document.getElementById('layersPanel')?.classList.toggle('visible');
+      else if (k === 's') document.getElementById('settingsPanel')?.classList.toggle('visible');
+      else if (k === 'p') setDrawShape('pen');
+      else if (k === 'r') setDrawShape('rect');
+      else if (k === 'c') setDrawShape('circle');
+      else if (k === '+' || k === '=') updateZoom(0.08, window.innerWidth / 2, window.innerHeight / 2);
+      else if (k === '-' || k === '_') updateZoom(-0.08, window.innerWidth / 2, window.innerHeight / 2);
+      else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); return; }
       if (e.key === 'Escape') { closeAllPanels(); selectElement(null); if (document.body.classList.contains('preview-mode')) togglePreview(); }
-      if (e.key === 'Delete' || e.key === 'Backspace') { state.selectedIds.forEach(id => document.getElementById(id)?.remove()); selectElement(null); }
+    });
+    document.addEventListener('keyup', e => {
+      if (e.key.toLowerCase() === (state.lastKeyDown || '').toLowerCase()) state.lastKeyDown = null;
     });
 
     // Init
@@ -1168,6 +1297,7 @@
           }
         });
         selectElement(null);
+        pushHistory();
       } },
       { id: 'export-png', name: 'Export as PNG', action: () => exportBoard('png') },
       { id: 'export-jpg', name: 'Export as JPG', action: () => exportBoard('jpeg') },
@@ -1198,9 +1328,7 @@
       };
     }
 
-    document.addEventListener('keydown', e => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'p') { e.preventDefault(); toggleCommandPalette(); }
-    });
+    // (Ctrl+P handled in main keyboard handler above)
 
     // Listeners for Settings
     document.getElementById('fontFamily').addEventListener('input', (e) => {
@@ -1228,5 +1356,12 @@
     });
 
     initPanelDragging('menuPanel'); initPanelDragging('queuePanel'); initPanelDragging('layersPanel'); initPanelDragging('settingsPanel');
+    document.getElementById('zoomInBtn').onclick = () => updateZoom(0.12, window.innerWidth / 2, window.innerHeight / 2);
+    document.getElementById('zoomOutBtn').onclick = () => updateZoom(-0.12, window.innerWidth / 2, window.innerHeight / 2);
+    document.addEventListener('click', e => {
+      if (!e.target.closest('#exportMenu, #exportBtn')) document.getElementById('exportMenu')?.classList.remove('visible');
+      if (!e.target.closest('#shareMenu, #shareBtn')) document.getElementById('shareMenu')?.classList.remove('visible');
+    });
     applyTransform();
     selectElement(null);
+    pushHistory();
