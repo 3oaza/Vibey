@@ -150,6 +150,11 @@
     /* Editable Title */
     .editable-title { font-weight: 500; font-size: 13px; color: #fff; padding: 4px 8px; border-radius: 4px; border: 1px solid transparent; outline: none; }
     .editable-title:focus { background: rgba(0,0,0,0.5); border-color: var(--accent); }
+    .save-status { font-size: 10px; font-weight: 600; color: #6b7280; white-space: nowrap; }
+    .save-status.ok { color: #4ade80; }
+    .save-status.bad { color: #f87171; }
+    body.theme-light .save-status.ok { color: #16a34a; }
+    body.theme-light .save-status.bad { color: #dc2626; }
     .app-logo {
       width: 28px;
       height: 28px;
@@ -316,6 +321,7 @@
       </button>
       <span class="app-logo"><img src="../assets/icons/Vector.svg" alt="Vibey logo"></span>
       <span id="canvasTitle" class="editable-title" contenteditable="true" spellcheck="false" title="Double-click to rename">Untitled</span>
+      <span id="saveStatus" class="save-status" title="Autosave status"></span>
     </div>
 
     <div class="header-right">

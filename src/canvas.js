@@ -768,6 +768,20 @@
     const AUTOSAVE_KEY = 'vibeyAutosave';
     let autosaveTimer = null;
     let autosaveWarned = false;
+    function setSaveStatus(mode) {
+      const el = document.getElementById('saveStatus');
+      if (!el) return;
+      el.classList.remove('ok', 'bad');
+      if (mode === 'saving') { el.textContent = 'Saving…'; }
+      else if (mode === 'saved') {
+        el.classList.add('ok');
+        const d = new Date();
+        el.textContent = 'Saved ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      }
+      else if (mode === 'failed') { el.classList.add('bad'); el.textContent = 'Save failed'; }
+      else if (mode === 'restored') { el.classList.add('ok'); el.textContent = 'Restored'; }
+      else { el.textContent = ''; }
+    }
     function serializeBoard() {
       return {
         app: 'vibey',
@@ -796,22 +810,26 @@
     }
     function scheduleAutosave() {
       if (autosaveTimer) clearTimeout(autosaveTimer);
+      setSaveStatus('saving');
       autosaveTimer = setTimeout(() => {
         autosaveTimer = null;
         let payload;
         try { payload = JSON.stringify(serializeBoard()); }
-        catch (e) { return; }
+        catch (e) { setSaveStatus('failed'); return; }
+        const onOk = () => setSaveStatus('saved');
         const onFail = () => {
+          setSaveStatus('failed');
           if (!autosaveWarned) { autosaveWarned = true; showToast('Autosave failed — board too large for storage'); }
         };
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
           try {
             chrome.storage.local.set({ [AUTOSAVE_KEY]: payload }, () => {
               if (chrome.runtime && chrome.runtime.lastError) onFail();
+              else onOk();
             });
           } catch (e) { onFail(); }
         } else {
-          try { localStorage.setItem(AUTOSAVE_KEY, payload); }
+          try { localStorage.setItem(AUTOSAVE_KEY, payload); onOk(); }
           catch (e) { onFail(); }
         }
       }, 1000);
@@ -826,6 +844,7 @@
         if (UI.elements.children.length > 0 || drawingDataURL) return;
         try {
           restoreBoardData(data);
+          setSaveStatus('restored');
           showToast('Board restored');
         } catch (e) { /* corrupt — start fresh */ }
       };
