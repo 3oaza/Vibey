@@ -33,10 +33,17 @@ chrome.contextMenus.onClicked.addListener(function (info) {
           // Show a brief notification
           chrome.notifications.create({
             type: 'basic',
-            iconUrl: 'logo-icon128.png',
+            iconUrl: chrome.runtime.getURL('assets/icons/logo-icon128.png'),
             title: 'Vibey',
             message: 'Image added to queue!',
           });
+        });
+      } else {
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('assets/icons/logo-icon128.png'),
+          title: 'Vibey',
+          message: 'Already in queue.',
         });
       }
     });
