@@ -369,11 +369,9 @@
     <div class="flex flex-col gap-2 mt-4">
       <div class="modal-item" id="menuSaveBtn"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v6h8V4"/><path d="M9 18h6"/></svg> Save Board (JSON)</div>
       <div class="modal-item" id="menuLoadBtn"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V6a2 2 0 0 1 2-2h4l2 2h5"/></svg> Load Board (JSON)</div>
-      <div class="modal-item" id="purImportBtn"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="m7 15 3-3 3 3 2-2 2 2"/><circle cx="9" cy="9" r="1.2"/></svg> Import PureRef (.pur)</div>
       <div class="modal-item" id="menuClearBtn"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M7 7l1 13h8l1-13"/><path d="M10 11v6M14 11v6"/></svg> Clear All Elements</div>
     </div>
-    <input type="file" id="loadBoardInput" accept=".json,.vibey.json,application/json" style="display:none">
-    <input type="file" id="purFileInput" accept=".pur" style="display:none">
+    <input type="file" id="loadBoardInput" accept=".json" style="display:none">
   </aside>
 
   <!-- FIX: Queue panel â€” ط¨ظٹط¬ظٹط¨ ط§ظ„طµظˆط± ظ…ظ† chrome.storage ظˆظٹط¹ط±ط¶ظ‡ط§ -->
@@ -569,7 +567,6 @@
   </script>
   <script src="../src/gifenc.js"></script>
   <script src="../src/CCapture.js"></script>
-  <script src="../src/purimport.js"></script>
   <script src="../src/canvas.js"></script>
 </body>
 </html>

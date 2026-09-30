@@ -509,12 +509,9 @@
       } else if (state.tool === 'draw') {
         state.isDrawing = true;
         state.drawStart = { x, y };
-        state.strokePoints = [{ x, y }];
         const ctx = UI.ctx;
         ctx.strokeStyle = document.getElementById('brushColor').value;
         ctx.lineWidth = document.getElementById('brushSize').value / state.zoom;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
         if (state.drawShape === 'pen') {
            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 0.1, y + 0.1); ctx.stroke();
         }
@@ -526,18 +523,7 @@
       if (!state.isDrawing || state.tool !== 'draw') return;
       const { x, y } = screenToBoard(e.clientX, e.clientY);
       if (state.drawShape === 'pen') {
-        // Smoothed stroke: quadratic curves through segment midpoints
-        const pts = state.strokePoints || (state.strokePoints = []);
-        pts.push({ x, y });
-        const ctx = UI.ctx;
-        if (pts.length === 2) {
-          ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.stroke();
-        } else if (pts.length > 2) {
-          const p0 = pts[pts.length - 3], p1 = pts[pts.length - 2], p2 = pts[pts.length - 1];
-          const m1x = (p0.x + p1.x) / 2, m1y = (p0.y + p1.y) / 2;
-          const m2x = (p1.x + p2.x) / 2, m2y = (p1.y + p2.y) / 2;
-          ctx.beginPath(); ctx.moveTo(m1x, m1y); ctx.quadraticCurveTo(p1.x, p1.y, m2x, m2y); ctx.stroke();
-        }
+        UI.ctx.lineTo(x, y); UI.ctx.stroke();
       } else {
         UI.pctx.clearRect(0, 0, UI.preview.width, UI.preview.height);
         UI.pctx.strokeStyle = '#8b89ff'; UI.pctx.lineWidth = 3 / state.zoom;
@@ -559,21 +545,6 @@
 
     window.addEventListener('mouseup', () => {
       if (state.isDrawing) {
-        if (state.drawShape === 'pen' && state.strokePoints && state.strokePoints.length > 1) {
-          // Flush the tail of the smoothed stroke to the final point
-          const pts = state.strokePoints;
-          const last = pts[pts.length - 1];
-          UI.ctx.beginPath();
-          if (pts.length === 2) { UI.ctx.moveTo(pts[0].x, pts[0].y); }
-          else {
-            const p1 = pts[pts.length - 2];
-            UI.ctx.moveTo((pts[pts.length - 3].x + p1.x) / 2, (pts[pts.length - 3].y + p1.y) / 2);
-            UI.ctx.quadraticCurveTo(p1.x, p1.y, (p1.x + last.x) / 2, (p1.y + last.y) / 2);
-            UI.ctx.moveTo((p1.x + last.x) / 2, (p1.y + last.y) / 2);
-          }
-          UI.ctx.lineTo(last.x, last.y); UI.ctx.stroke();
-        }
-        state.strokePoints = null;
         if (state.drawShape !== 'pen') {
            const { x, y } = screenToBoard(state.mouseX, state.mouseY);
            const start = state.drawStart;
@@ -677,7 +648,6 @@
       historyStack.push(snapshotBoard());
       if (historyStack.length > 50) historyStack.shift();
       historyIndex = historyStack.length - 1;
-      scheduleAutosave();
     }
     function restoreSnapshot(snap) {
       isRestoringHistory = true;
@@ -790,79 +760,6 @@
             }
           });
         } catch (e) {}
-      }
-    }
-
-    // ── Board persistence: autosave + .vibey.json project files ──
-    const AUTOSAVE_KEY = 'vibeyAutosave';
-    let autosaveTimer = null;
-    let autosaveWarned = false;
-    function serializeBoard() {
-      return {
-        app: 'vibey',
-        version: 1,
-        savedAt: Date.now(),
-        title: state.title,
-        theme: document.body.classList.contains('theme-light') ? 'light'
-          : (document.body.classList.contains('theme-glass') ? 'glass' : 'dark'),
-        elements: UI.elements.innerHTML,
-        drawing: drawingDataURL
-      };
-    }
-    function restoreBoardData(data) {
-      if (!data || typeof data !== 'object' || typeof data.elements !== 'string') {
-        throw new Error('Not a Vibey board file');
-      }
-      restoreSnapshot({ html: data.elements, drawing: data.drawing || null });
-      if (typeof data.title === 'string' && data.title) {
-        state.title = data.title;
-        const t = document.getElementById('canvasTitle');
-        if (t) t.innerText = data.title;
-        document.title = 'Vibey - ' + data.title;
-      }
-      if (data.theme) applyThemeClass(data.theme);
-      pushHistory();
-    }
-    function scheduleAutosave() {
-      if (autosaveTimer) clearTimeout(autosaveTimer);
-      autosaveTimer = setTimeout(() => {
-        autosaveTimer = null;
-        let payload;
-        try { payload = JSON.stringify(serializeBoard()); }
-        catch (e) { return; }
-        const onFail = () => {
-          if (!autosaveWarned) { autosaveWarned = true; showToast('Autosave failed (board too large?)'); }
-        };
-        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-          try {
-            chrome.storage.local.set({ [AUTOSAVE_KEY]: payload }, () => {
-              if (chrome.runtime && chrome.runtime.lastError) onFail();
-            });
-          } catch (e) { onFail(); }
-        } else {
-          try { localStorage.setItem(AUTOSAVE_KEY, payload); }
-          catch (e) { onFail(); }
-        }
-      }, 1000);
-    }
-    function loadAutosave() {
-      const done = (payload) => {
-        if (!payload) return;
-        let data;
-        try { data = JSON.parse(payload); }
-        catch (e) { return; }
-        if (!data || !data.elements) return;
-        if (UI.elements.children.length > 0 || drawingDataURL) return;
-        try {
-          restoreBoardData(data);
-          showToast('Board restored');
-        } catch (e) { /* corrupt — start fresh */ }
-      };
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        try { chrome.storage.local.get([AUTOSAVE_KEY], (r) => done(r && r[AUTOSAVE_KEY])); }
-        catch (e) {}
-      } else {
-        try { done(localStorage.getItem(AUTOSAVE_KEY)); } catch (e) {}
       }
     }
 
@@ -1359,118 +1256,6 @@
     };
 
     // Menu Panel
-    document.getElementById('menuSaveBtn').onclick = () => {
-      try {
-        const blob = new Blob([JSON.stringify(serializeBoard())], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const safe = (state.title || 'Vibey').replace(/[\\/:*?"<>|]/g, '-');
-        downloadDataUrl(safe + '.vibey.json', url);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-        showToast('Board saved');
-      } catch (e) { showToast('Save failed: ' + e.message); }
-    };
-    document.getElementById('menuLoadBtn').onclick = () => document.getElementById('loadBoardInput').click();
-    document.getElementById('loadBoardInput').onchange = (e) => {
-      const f = e.target.files && e.target.files[0];
-      e.target.value = '';
-      if (!f) return;
-      const r = new FileReader();
-      r.onload = (re) => {
-        try {
-          const data = JSON.parse(re.target.result);
-          if (UI.elements.children.length > 0 && !confirm('Replace current board?')) return;
-          restoreBoardData(data);
-          showToast('Board loaded');
-        } catch (err) { showToast('Load failed: ' + err.message); }
-      };
-      r.readAsText(f);
-    };
-    document.getElementById('purImportBtn').onclick = () => document.getElementById('purFileInput').click();
-    document.getElementById('purFileInput').onchange = async (e) => {
-      const f = e.target.files && e.target.files[0];
-      e.target.value = '';
-      if (!f) return;
-      if (!window.PurImport) { showToast('PUR importer missing — reload the canvas'); return; }
-      try {
-        showToast('Reading PureRef file…');
-        const buf = await f.arrayBuffer();
-        const res = window.PurImport.parse(buf);
-        await importPurResult(res);
-      } catch (err) { showToast('PUR import failed: ' + err.message); }
-    };
-    function blobToDataURL(blob) {
-      return new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = (re) => resolve(re.target.result);
-        r.onerror = reject;
-        r.readAsDataURL(blob);
-      });
-    }
-    async function importPurResult(res) {
-      const entries = [
-        ...res.images.map((i) => ({ kind: 'image', x: i.x, y: i.y, z: i.z, w: i.w, h: i.h, data: i.data, name: i.name, rotated: i.rotated, unplaced: i.unplaced })),
-        ...res.texts.map((t) => ({ kind: 'text', x: t.x, y: t.y, z: t.z, text: t.text, rgb: t.rgb, unplaced: false }))
-      ];
-      if (!entries.length) { showToast('No images found in .pur file'); return; }
-      const MAX_IMPORT = 150;
-      const capped = entries.length > MAX_IMPORT;
-      const list = entries.slice(0, MAX_IMPORT);
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      list.forEach((it) => {
-        if (typeof it.x !== 'number' || typeof it.y !== 'number' || it.unplaced) return;
-        minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
-        maxX = Math.max(maxX, it.x); maxY = Math.max(maxY, it.y);
-      });
-      let offX = 0, offY = 0;
-      if (minX !== Infinity) {
-        const c = screenToBoard(window.innerWidth / 2, window.innerHeight / 2);
-        offX = c.x - (minX + maxX) / 2;
-        offY = c.y - (minY + maxY) / 2;
-      }
-      list.sort((a, b) => (a.z || 0) - (b.z || 0));
-      let rotated = false;
-      let n = 0;
-      isRestoringHistory = true;
-      try {
-        for (const it of list) {
-          if (it.kind === 'text' && it.text) {
-            const pos = it.unplaced ? getNextPlacement() : { x: it.x + offX, y: it.y + offY };
-            const el = addElement('text', it.text, pos.x, pos.y);
-            if (it.rgb) {
-              const css = 'rgb(' + Math.round(it.rgb[0] / 257) + ',' + Math.round(it.rgb[1] / 257) + ',' + Math.round(it.rgb[2] / 257) + ')';
-              const txt = el.querySelector('.board-text');
-              if (txt) txt.style.color = css;
-            }
-            n++;
-          } else if (it.kind === 'image' && it.data) {
-            const url = await blobToDataURL(new Blob([it.data], { type: 'image/png' }));
-            let pos;
-            if (it.unplaced || !(it.w > 0 && it.h > 0)) {
-              pos = getNextPlacement(280, 200);
-            } else {
-              pos = { x: it.x - it.w / 2 + offX, y: it.y - it.h / 2 + offY };
-            }
-            const el = addElement('image', url, pos.x, pos.y);
-            if (!it.unplaced && it.w > 0 && it.h > 0) {
-              el.style.width = Math.max(40, it.w) + 'px';
-              el.style.height = Math.max(40, it.h) + 'px';
-            }
-            if (it.rotated) rotated = true;
-            n++;
-          }
-        }
-      } finally {
-        isRestoringHistory = false;
-      }
-      updateLayersPanel();
-      pushHistory();
-      let msg = 'Imported ' + n + ' item' + (n === 1 ? '' : 's') + ' from PureRef';
-      if (res.partial) msg += ' (positions unknown)';
-      if (capped) msg += ' (first ' + MAX_IMPORT + ')';
-      if (rotated) msg += ' — rotation skipped';
-      showToast(msg);
-    }
-    document.getElementById('menuClearBtn').onclick = () => { if(confirm('Clear entire board?')) { UI.elements.innerHTML = ''; selectElement(null); updateLayersPanel(); pushHistory(); } };
     document.getElementById('menuClearBtn').onclick = () => { if(confirm('Clear entire board?')) { UI.elements.innerHTML = ''; selectElement(null); updateLayersPanel(); pushHistory(); } };
 
     // Toolbar logic
@@ -1621,4 +1406,3 @@
     applyTransform();
     selectElement(null);
     pushHistory();
-    loadAutosave();
