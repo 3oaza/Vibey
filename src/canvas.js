@@ -725,6 +725,44 @@
       showToast(shape === 'pen' ? 'Pen tool (P)' : shape === 'rect' ? 'Rectangle (R)' : shape === 'circle' ? 'Circle (C)' : shape);
     }
 
+    const THEMES = ['dark', 'light', 'glass'];
+    function getSavedTheme() {
+      try { return localStorage.getItem('vibeyTheme') || 'dark'; }
+      catch (e) { return 'dark'; }
+    }
+    function applyThemeClass(name) {
+      if (!THEMES.includes(name)) name = 'dark';
+      document.body.classList.remove('theme-dark', 'theme-light', 'theme-glass');
+      if (name !== 'dark') document.body.classList.add('theme-' + name);
+    }
+    function setTheme(name) {
+      if (!THEMES.includes(name)) name = 'dark';
+      applyThemeClass(name);
+      try { localStorage.setItem('vibeyTheme', name); } catch (e) {}
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        try { chrome.storage.local.set({ vibeyTheme: name }); } catch (e) {}
+      }
+      showToast(name === 'light' ? 'Light mode' : name === 'glass' ? 'Glass mode' : 'Dark mode');
+    }
+    function toggleTheme() {
+      const cur = document.body.classList.contains('theme-light') ? 'light'
+        : document.body.classList.contains('theme-glass') ? 'glass' : 'dark';
+      setTheme(cur === 'dark' ? 'light' : 'dark');
+    }
+    function applyStoredTheme() {
+      applyThemeClass(getSavedTheme());
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        try {
+          chrome.storage.local.get(['vibeyTheme'], (r) => {
+            if (r && r.vibeyTheme && THEMES.includes(r.vibeyTheme)) {
+              applyThemeClass(r.vibeyTheme);
+              try { localStorage.setItem('vibeyTheme', r.vibeyTheme); } catch (e) {}
+            }
+          });
+        } catch (e) {}
+      }
+    }
+
     // Header Actions
     document.getElementById('menuBtn').onclick = () => { closeAllPanels('menuPanel'); document.getElementById('menuPanel').classList.toggle('visible'); };
     document.getElementById('shareBtn').onclick = (e) => { document.getElementById('shareMenu').classList.toggle('visible'); e.stopPropagation(); };
@@ -1179,6 +1217,8 @@
 
     const settingsBtn = document.getElementById('settingsBtn');
     if (settingsBtn) settingsBtn.onclick = () => document.getElementById('settingsPanel').classList.toggle('visible');
+    const themeBtn = document.getElementById('themeBtn');
+    if (themeBtn) themeBtn.onclick = () => toggleTheme();
 
     // Header Actions & Settings
     document.getElementById('canvasTitle').onblur = (e) => { state.title = e.target.innerText; document.title = `Vibey - ${state.title}`; };
@@ -1301,9 +1341,9 @@
       } },
       { id: 'export-png', name: 'Export as PNG', action: () => exportBoard('png') },
       { id: 'export-jpg', name: 'Export as JPG', action: () => exportBoard('jpeg') },
-      { id: 'theme-dark', name: 'Theme: Dark', action: () => document.body.className = 'theme-dark' },
-      { id: 'theme-light', name: 'Theme: Light', action: () => document.body.className = 'theme-light' },
-      { id: 'theme-glass', name: 'Theme: Glass', action: () => document.body.className = 'theme-glass' }
+      { id: 'theme-dark', name: 'Theme: Dark', action: () => setTheme('dark') },
+      { id: 'theme-light', name: 'Theme: Light', action: () => setTheme('light') },
+      { id: 'theme-glass', name: 'Theme: Glass', action: () => setTheme('glass') }
     ];
 
     function toggleCommandPalette() {
@@ -1356,6 +1396,7 @@
     });
 
     initPanelDragging('menuPanel'); initPanelDragging('queuePanel'); initPanelDragging('layersPanel'); initPanelDragging('settingsPanel');
+    applyStoredTheme();
     document.getElementById('zoomInBtn').onclick = () => updateZoom(0.12, window.innerWidth / 2, window.innerHeight / 2);
     document.getElementById('zoomOutBtn').onclick = () => updateZoom(-0.12, window.innerWidth / 2, window.innerHeight / 2);
     document.addEventListener('click', e => {

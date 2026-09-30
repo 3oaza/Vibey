@@ -168,3 +168,39 @@ body {
 .empty-state.visible {
   display: block;
 }
+
+/* ── Light theme (follows stored vibeyTheme; dark is default) ── */
+body.theme-light {
+  background-color: #eef0f4;
+}
+
+body.theme-light .outer {
+  background-color: #eef0f4;
+}
+
+body.theme-light .card {
+  background-color: #ffffff;
+  border-color: rgba(20, 25, 40, 0.1);
+  box-shadow: 0 20px 60px rgba(30, 35, 60, 0.15);
+}
+
+body.theme-light .header-text .label {
+  color: #6d6bff;
+}
+
+body.theme-light .header-text .title {
+  color: #171a21;
+}
+
+body.theme-light .img-card {
+  border-color: rgba(20, 25, 40, 0.1);
+  background-color: #f4f5f7;
+}
+
+body.theme-light .empty-state {
+  color: #7c8598;
+}
+
+body.theme-light .empty-state .empty-sub {
+  color: #a2abb9;
+}

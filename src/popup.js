@@ -71,6 +71,22 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 
+  // ── Apply stored theme (set from the canvas page) ────────────────
+  function applyStoredTheme() {
+    let name = 'dark';
+    try { name = localStorage.getItem('vibeyTheme') || 'dark'; } catch (e) {}
+    if (name === 'light') document.body.classList.add('theme-light');
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      try {
+        chrome.storage.local.get(['vibeyTheme'], function (result) {
+          document.body.classList.toggle('theme-light', result && result.vibeyTheme === 'light');
+          try { if (result && result.vibeyTheme) localStorage.setItem('vibeyTheme', result.vibeyTheme); } catch (e) {}
+        });
+      } catch (e) {}
+    }
+  }
+
   // ── Init ──────────────────────────────────────────────────────────
+  applyStoredTheme();
   loadImages();
 });
