@@ -648,6 +648,7 @@
       historyStack.push(snapshotBoard());
       if (historyStack.length > 50) historyStack.shift();
       historyIndex = historyStack.length - 1;
+      scheduleAutosave();
     }
     function restoreSnapshot(snap) {
       isRestoringHistory = true;
@@ -763,10 +764,82 @@
       }
     }
 
+    // ── Board autosave: survive refresh, warn when storage is too small ──
+    const AUTOSAVE_KEY = 'vibeyAutosave';
+    let autosaveTimer = null;
+    let autosaveWarned = false;
+    function serializeBoard() {
+      return {
+        app: 'vibey',
+        version: 1,
+        savedAt: Date.now(),
+        title: state.title,
+        theme: document.body.classList.contains('theme-light') ? 'light'
+          : (document.body.classList.contains('theme-glass') ? 'glass' : 'dark'),
+        elements: UI.elements.innerHTML,
+        drawing: drawingDataURL
+      };
+    }
+    function restoreBoardData(data) {
+      if (!data || typeof data !== 'object' || typeof data.elements !== 'string') {
+        throw new Error('Bad board data');
+      }
+      restoreSnapshot({ html: data.elements, drawing: data.drawing || null });
+      if (typeof data.title === 'string' && data.title) {
+        state.title = data.title;
+        const t = document.getElementById('canvasTitle');
+        if (t) t.innerText = data.title;
+        document.title = 'Vibey - ' + data.title;
+      }
+      if (data.theme) applyThemeClass(data.theme);
+      pushHistory();
+    }
+    function scheduleAutosave() {
+      if (autosaveTimer) clearTimeout(autosaveTimer);
+      autosaveTimer = setTimeout(() => {
+        autosaveTimer = null;
+        let payload;
+        try { payload = JSON.stringify(serializeBoard()); }
+        catch (e) { return; }
+        const onFail = () => {
+          if (!autosaveWarned) { autosaveWarned = true; showToast('Autosave failed — board too large for storage'); }
+        };
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+          try {
+            chrome.storage.local.set({ [AUTOSAVE_KEY]: payload }, () => {
+              if (chrome.runtime && chrome.runtime.lastError) onFail();
+            });
+          } catch (e) { onFail(); }
+        } else {
+          try { localStorage.setItem(AUTOSAVE_KEY, payload); }
+          catch (e) { onFail(); }
+        }
+      }, 1000);
+    }
+    function loadAutosave() {
+      const done = (payload) => {
+        if (!payload) return;
+        let data;
+        try { data = JSON.parse(payload); }
+        catch (e) { return; }
+        if (!data || !data.elements) return;
+        if (UI.elements.children.length > 0 || drawingDataURL) return;
+        try {
+          restoreBoardData(data);
+          showToast('Board restored');
+        } catch (e) { /* corrupt — start fresh */ }
+      };
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        try { chrome.storage.local.get([AUTOSAVE_KEY], (r) => done(r && r[AUTOSAVE_KEY])); }
+        catch (e) {}
+      } else {
+        try { done(localStorage.getItem(AUTOSAVE_KEY)); } catch (e) {}
+      }
+    }
+
     // Header Actions
     document.getElementById('menuBtn').onclick = () => { closeAllPanels('menuPanel'); document.getElementById('menuPanel').classList.toggle('visible'); };
     document.getElementById('shareBtn').onclick = (e) => { document.getElementById('shareMenu').classList.toggle('visible'); e.stopPropagation(); };
-    document.getElementById('shareCopyLink').onclick = () => { navigator.clipboard.writeText(window.location.href); showToast('Link copied!'); };
     document.getElementById('shareClearBoard').onclick = () => { if (confirm('Clear board?')) { UI.elements.innerHTML = ''; selectElement(null); updateLayersPanel(); pushHistory(); } };
 
     // --- REFINED EXPORT ENGINE ---
@@ -1267,7 +1340,69 @@
         r.onload = (re) => { const p = getNextPlacement(); addElement('image', re.target.result, p.x + i*20, p.y + i*20); };
         r.readAsDataURL(f);
       });
+      e.target.value = '';
     };
+    // ── Drag & drop + clipboard paste: images from web pages, files, clipboard ──
+    function handleImageFile(file, x, y) {
+      if (!file || !file.type || !file.type.startsWith('image/')) return false;
+      const r = new FileReader();
+      r.onload = (re) => {
+        let pos = (typeof x === 'number') ? { x, y } : getNextPlacement();
+        addElement('image', re.target.result, pos.x, pos.y);
+      };
+      r.readAsDataURL(file);
+      return true;
+    }
+    function addImageUrlAt(url, clientX, clientY) {
+      const clean = (url || '').split('\n').map((s) => s.trim()).find((s) => s && !s.startsWith('#'));
+      if (!clean || (!clean.startsWith('http') && !clean.startsWith('data:image'))) return false;
+      let x, y;
+      if (typeof clientX === 'number') {
+        const p = screenToBoard(clientX, clientY);
+        x = p.x - 140; y = p.y - 100;
+      } else {
+        const p = getNextPlacement(); x = p.x; y = p.y;
+      }
+      addElement('image', clean, x, y);
+      showToast('Image added — drag it where you like');
+      return true;
+    }
+    UI.board.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      UI.board.classList.add('dragging-over');
+    });
+    UI.board.addEventListener('dragleave', (e) => {
+      if (e.target === UI.board) UI.board.classList.remove('dragging-over');
+    });
+    UI.board.addEventListener('drop', (e) => {
+      e.preventDefault();
+      UI.board.classList.remove('dragging-over');
+      const dt = e.dataTransfer;
+      if (dt.files && dt.files.length) {
+        let n = 0;
+        Array.from(dt.files).forEach((f, i) => {
+          const p = screenToBoard(e.clientX, e.clientY);
+          if (handleImageFile(f, p.x - 140 + i * 20, p.y - 100 + i * 20)) n++;
+        });
+        if (!n) showToast('Only image files can be dropped');
+        return;
+      }
+      const url = dt.getData('text/uri-list') || dt.getData('text/plain');
+      if (!addImageUrlAt(url, e.clientX, e.clientY)) showToast('Drop an image file or image link');
+    });
+    document.addEventListener('paste', (e) => {
+      if (isTypingTarget(e.target)) return;
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      for (const it of items) {
+        if (it.type && it.type.startsWith('image/')) {
+          const f = it.getAsFile();
+          if (f && handleImageFile(f)) { e.preventDefault(); return; }
+        }
+      }
+      const text = e.clipboardData ? e.clipboardData.getData('text') : '';
+      if (text && text.trim() && addImageUrlAt(text.trim())) e.preventDefault();
+    });
     document.getElementById('toggleQueueBtn').onclick = () => document.getElementById('queuePanel').classList.toggle('visible');
     document.getElementById('toggleLayersBtn').onclick = () => document.getElementById('layersPanel').classList.toggle('visible');
     document.getElementById('duplicateBtn').onclick = () => duplicateSelected();
@@ -1406,3 +1541,4 @@
     applyTransform();
     selectElement(null);
     pushHistory();
+    loadAutosave();

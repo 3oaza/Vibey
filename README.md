@@ -33,7 +33,7 @@
 
 ### 📤 High-Fidelity Exporting
 * **Static**: PNG, JPEG, and WebP support with high-resolution output.
-* **Animated**: Export your canvas sessions as smooth **High-Res GIFs** or **4K MP4** videos (perfect for Behance or social media).
+* **Animated**: Export your canvas sessions as smooth **High-Res GIFs** or **WebM** videos (perfect for Behance or social media).
 * **Match View**: Choose to export your entire project or just your current viewport.
 
 ---

@@ -139,6 +139,9 @@
     /* Board & Layers */
     main#board { position: relative; width: 100vw; height: 100vh; z-index: 10; overflow: hidden; cursor: grab; }
     main#board.panning { cursor: grabbing; }
+    main#board.dragging-over { outline: 2px dashed var(--accent); outline-offset: -12px; }
+    main#board.dragging-over::after { content: 'Drop to add to canvas'; position: fixed; top: 68px; left: 50%; transform: translateX(-50%); background: var(--accent-soft); border: 1px solid var(--accent); color: var(--accent); font-size: 12px; font-weight: 700; padding: 8px 20px; border-radius: 99px; z-index: 3000; pointer-events: none; }
+    body.theme-light main#board.dragging-over::after { background: rgba(109, 107, 255, 0.12); }
     #content-layer { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
     #drawing-canvas { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
     #drawing-canvas.active { pointer-events: auto; cursor: crosshair; }
@@ -344,12 +347,11 @@
     
     <div class="px-3 py-2 text-[10px] text-white/30 uppercase font-black tracking-widest border-y border-white/5 my-1">Export As Animation</div>
     <div class="modal-item" data-export-format="gif"><svg class="icon-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg> High-Res Animated GIF</div>
-    <div class="modal-item" data-export-format="mp4"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M15 10l4.55-2.27A1 1 0 0 1 21 8.61v6.78a1 1 0 0 1-1.45.89L15 14v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/></svg> Pro-Quality 4K MP4 (Behance)</div>
+    <div class="modal-item" data-export-format="mp4"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M15 10l4.55-2.27A1 1 0 0 1 21 8.61v6.78a1 1 0 0 1-1.45.89L15 14v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/></svg> Pro-Quality Video (WebM)</div>
   </div>
 
   <!-- Share Menu -->
   <div id="shareMenu" class="modal-menu">
-    <div class="modal-item" id="shareCopyLink"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07L10.7 5.23"/><path d="M14 11a5 5 0 0 0-7.07 0L4.8 13.12a5 5 0 1 0 7.07 7.07L13.3 18.8"/></svg> Copy Link</div>
     <div class="modal-item" id="shareEmail"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="m5 7 7 6 7-6"/></svg> Email Project</div>
     <div class="modal-item" id="shareClearBoard"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M7 7l1 13h8l1-13"/><path d="M10 11v6M14 11v6"/></svg> Clear Board</div>
   </div>
