@@ -126,6 +126,9 @@
     .queue-item img { width: 100%; display: block; object-fit: cover; height: 120px; }
     .queue-item .add-overlay { position: absolute; inset: 0; background: rgba(139,137,255,0.2); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
     .queue-item:hover .add-overlay { opacity: 1; }
+    .queue-item.queue-text { padding: 12px; background: rgba(255, 255, 255, 0.03); }
+    .queue-text-body { font-size: 11px; line-height: 1.5; color: var(--text); word-break: break-word; max-height: 110px; overflow: hidden; }
+    body.theme-light .queue-item.queue-text { background: rgba(20, 25, 40, 0.04); }
     #queueList { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
     #queueList::-webkit-scrollbar { width: 4px; }
     #queueList::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }

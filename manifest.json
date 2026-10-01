@@ -19,6 +19,15 @@
     "service_worker": "src/background.js"
   },
 
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["src/content-collect.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+
   "web_accessible_resources": [
     {
       "resources": [

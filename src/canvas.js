@@ -566,11 +566,13 @@
       else panBoard(-e.deltaX, -e.deltaY);
     }, { passive: false });
 
-    function renderQueuePanel(images) {
+    function renderQueuePanel(images, texts) {
+      images = images || [];
+      texts = texts || [];
       const list = document.getElementById('queueList');
       const count = document.getElementById('queueCount');
-      if (count) count.textContent = images.length;
-      list.innerHTML = images.length === 0 ? '<p class="text-[11px] text-slate-600 italic text-center py-20">Queue is empty.</p>' : '';
+      if (count) count.textContent = images.length + texts.length;
+      list.innerHTML = (images.length === 0 && texts.length === 0) ? '<p class="text-[11px] text-slate-600 italic text-center py-20">Queue is empty.</p>' : '';
       images.forEach((url) => {
         const item = document.createElement('div'); item.className = 'queue-item';
         const img = document.createElement('img'); img.src = url;
@@ -584,12 +586,31 @@
         });
         list.appendChild(item);
       });
+      texts.forEach((t) => {
+        const item = document.createElement('div'); item.className = 'queue-item queue-text';
+        const p = document.createElement('p'); p.className = 'queue-text-body';
+        p.textContent = (t.text || '').slice(0, 140);
+        const overlay = document.createElement('div'); overlay.className = 'add-overlay';
+        overlay.innerHTML = '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>';
+        item.appendChild(p); item.appendChild(overlay);
+        item.addEventListener('click', () => {
+          const pos = getNextPlacement(280, 200);
+          addElement('text', t.text, pos.x, pos.y);
+          showToast('Text added.');
+        });
+        list.appendChild(item);
+      });
     }
 
     function loadQueue() {
       if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.local.get(['moodboardImages'], (r) => renderQueuePanel(r.moodboardImages || []));
-        chrome.storage.onChanged.addListener(c => c.moodboardImages && renderQueuePanel(c.moodboardImages.newValue || []));
+        const refresh = () => {
+          chrome.storage.local.get(['moodboardImages', 'moodboardTexts'], (r) => {
+            renderQueuePanel((r && r.moodboardImages) || [], (r && r.moodboardTexts) || []);
+          });
+        };
+        refresh();
+        chrome.storage.onChanged.addListener(c => { if (c.moodboardImages || c.moodboardTexts) refresh(); });
       }
     }
     loadQueue();

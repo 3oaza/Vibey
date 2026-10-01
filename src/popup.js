@@ -3,25 +3,26 @@ document.addEventListener('DOMContentLoaded', function () {
   const grid       = document.getElementById('imageGrid');
   const emptyState = document.getElementById('emptyState');
   const canvasBtn  = document.getElementById('openCanvasBtn');
+  const notesLabel = document.getElementById('notesLabel');
+  const notesList  = document.getElementById('notesList');
 
-  // ── Load images from storage and render ──────────────────────────
-  function loadImages() {
-    chrome.storage.local.get(['moodboardImages'], function (result) {
-      const images = result.moodboardImages || [];
-      renderGrid(images);
+  // ── Load queue (images + texts) and render ────────────────────────
+  function loadAll() {
+    chrome.storage.local.get(['moodboardImages', 'moodboardTexts'], function (result) {
+      renderGrid(result.moodboardImages || [], result.moodboardTexts || []);
     });
   }
 
-  // ── Render the 2-column image grid ───────────────────────────────
-  function renderGrid(images) {
+  // ── Render the 2-column image grid + text notes ───────────────────
+  function renderGrid(images, texts) {
     grid.innerHTML = '';
+    notesList.innerHTML = '';
 
-    if (images.length === 0) {
+    if (images.length === 0 && texts.length === 0) {
       emptyState.classList.add('visible');
-      return;
+    } else {
+      emptyState.classList.remove('visible');
     }
-
-    emptyState.classList.remove('visible');
 
     images.forEach(function (url, index) {
       const card = document.createElement('div');
@@ -45,6 +46,30 @@ document.addEventListener('DOMContentLoaded', function () {
       card.appendChild(removeBtn);
       grid.appendChild(card);
     });
+
+    if (texts.length > 0) {
+      notesLabel.style.display = 'block';
+    } else {
+      notesLabel.style.display = 'none';
+    }
+
+    texts.forEach(function (t) {
+      const card = document.createElement('div');
+      card.className = 'note-card';
+      card.textContent = t.text || '';
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'remove-btn';
+      removeBtn.innerHTML = '&times;';
+      removeBtn.title = 'Remove';
+      removeBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        removeText(t.text);
+      });
+
+      card.appendChild(removeBtn);
+      notesList.appendChild(card);
+    });
   }
 
   // ── Remove a single image from storage ───────────────────────────
@@ -59,15 +84,27 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
+  // ── Remove a single text note from storage ─────────────────────────
+  function removeText(textToRemove) {
+    chrome.storage.local.get(['moodboardTexts'], function (result) {
+      const texts = (result.moodboardTexts || []).filter(function (t) {
+        return !t || t.text !== textToRemove;
+      });
+      chrome.storage.local.set({ moodboardTexts: texts }, function () {
+        loadAll();
+      });
+    });
+  }
+
   // ── Open Canvas button ────────────────────────────────────────────
   canvasBtn.addEventListener('click', function () {
     chrome.tabs.create({ url: chrome.runtime.getURL('popup/canvas.html') });
   });
 
-  // ── Listen for new images added while popup is open ───────────────
+  // ── Listen for new items added while popup is open ───────────────
   chrome.storage.onChanged.addListener(function (changes) {
-    if (changes.moodboardImages) {
-      renderGrid(changes.moodboardImages.newValue || []);
+    if (changes.moodboardImages || changes.moodboardTexts) {
+      loadAll();
     }
   });
 
@@ -88,5 +125,5 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ── Init ──────────────────────────────────────────────────────────
   applyStoredTheme();
-  loadImages();
+  loadAll();
 });

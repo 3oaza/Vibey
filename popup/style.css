@@ -169,6 +169,68 @@ body {
   display: block;
 }
 
+/* ── Text notes ── */
+.notes-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #b9a3ff;
+  margin: 16px 0 8px;
+}
+
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-card {
+  background-color: #181824;
+  border: 1px solid #2a1f3d;
+  border-radius: 12px;
+  padding: 10px 12px;
+  position: relative;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d4d4dc;
+  word-break: break-word;
+}
+
+.note-card .remove-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.55);
+  border: none;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.note-card:hover .remove-btn {
+  opacity: 1;
+}
+
+body.theme-light .note-card {
+  background-color: #f4f5f7;
+  border-color: rgba(20, 25, 40, 0.1);
+  color: #171a21;
+}
+
+body.theme-light .notes-label {
+  color: #6d6bff;
+}
+
 /* ── Light theme (follows stored vibeyTheme; dark is default) ── */
 body.theme-light {
   background-color: #eef0f4;

@@ -9,7 +9,14 @@ chrome.runtime.onInstalled.addListener(function () {
       contexts: ['image'],
     });
 
-    // 2. Context for the Page (General access)
+    // 2. Context for selected text
+    chrome.contextMenus.create({
+      id: 'addTextToMoodboard',
+      title: 'Add Selection to Vibey',
+      contexts: ['selection'],
+    });
+
+    // 3. Context for the Page (General access)
     chrome.contextMenus.create({
       id: 'openMoodboard',
       title: 'Open Vibey Canvas',
@@ -36,6 +43,30 @@ chrome.contextMenus.onClicked.addListener(function (info) {
             iconUrl: chrome.runtime.getURL('assets/icons/logo-icon128.png'),
             title: 'Vibey',
             message: 'Image added to queue!',
+          });
+        });
+      } else {
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('assets/icons/logo-icon128.png'),
+          title: 'Vibey',
+          message: 'Already in queue.',
+        });
+      }
+    });
+  } else if (info.menuItemId === 'addTextToMoodboard' && info.selectionText) {
+    const text = info.selectionText.trim().slice(0, 2000);
+    if (!text) return;
+    chrome.storage.local.get(['moodboardTexts'], function (result) {
+      const texts = result.moodboardTexts || [];
+      if (!texts.some(function (t) { return t && t.text === text; })) {
+        texts.unshift({ text: text, url: info.pageUrl || '', ts: Date.now() });
+        chrome.storage.local.set({ moodboardTexts: texts }, function () {
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('assets/icons/logo-icon128.png'),
+            title: 'Vibey',
+            message: 'Text added to queue!',
           });
         });
       } else {
