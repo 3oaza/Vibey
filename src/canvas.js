@@ -280,7 +280,7 @@
       let start = { x: 0, y: 0 };
       el.addEventListener('mousedown', (e) => {
         if (state.tool !== 'select' || e.target.classList.contains('resizer')) return;
-        if (state.lastKeyDown === 's' || state.lastKeyDown === 'S') { pickColor(e); return; }
+        if (state.lastKeyDown === 'e') { pickColor(e); return; }
         const txt = e.target.closest('.board-text');
         if (txt && document.activeElement === txt) return;
         isDragging = true;
@@ -703,10 +703,15 @@
         c.style.left = ((parseFloat(t.style.left) || 0) + 24) + 'px';
         c.style.top = ((parseFloat(t.style.top) || 0) + 24) + 'px';
         c.classList.remove('selected');
+        // Fresh IDs for the whole subtree (cloned groups carry duplicate IDs otherwise)
+        c.querySelectorAll('[id]').forEach((kid) => { kid.id = 'el-' + createId(); });
+        c.querySelectorAll('.board-item.selected').forEach((kid) => kid.classList.remove('selected'));
         UI.elements.appendChild(c);
         syncElementStack();
         makeDraggable(c);
         makeResizable(c);
+        // Clones lose listeners: rebind every nested item too
+        c.querySelectorAll('.board-item').forEach((kid) => { makeDraggable(kid); makeResizable(kid); });
         newIds.push(nid);
       });
       if (newIds.length) {
@@ -886,6 +891,20 @@
     // Header Actions
     document.getElementById('menuBtn').onclick = () => { closeAllPanels('menuPanel'); document.getElementById('menuPanel').classList.toggle('visible'); };
     document.getElementById('shareBtn').onclick = (e) => { document.getElementById('shareMenu').classList.toggle('visible'); e.stopPropagation(); };
+    document.getElementById('shareEmail').onclick = () => {
+      const n = UI.elements.children.length;
+      const subject = encodeURIComponent('Vibey board: ' + (state.title || 'Untitled'));
+      const body = encodeURIComponent(
+        'Board: ' + (state.title || 'Untitled') + '\nItems: ' + n +
+        '\nExported: ' + new Date().toLocaleString() +
+        '\n\nTip: export the board as PNG from Vibey and attach it to this email.'
+      );
+      const a = document.createElement('a');
+      a.href = 'mailto:?subject=' + subject + '&body=' + body;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    };
     document.getElementById('shareClearBoard').onclick = () => { if (confirm('Clear board?')) { UI.elements.innerHTML = ''; selectElement(null); updateLayersPanel(); pushHistory(); } };
 
     // --- REFINED EXPORT ENGINE ---
@@ -1338,6 +1357,12 @@
     if (settingsBtn) settingsBtn.onclick = () => document.getElementById('settingsPanel').classList.toggle('visible');
     const themeBtn = document.getElementById('themeBtn');
     if (themeBtn) themeBtn.onclick = () => toggleTheme();
+    const shortcutsBtn = document.getElementById('shortcutsBtn');
+    if (shortcutsBtn) shortcutsBtn.onclick = () => toggleShortcuts(true);
+    const shortcutsClose = document.getElementById('shortcutsClose');
+    if (shortcutsClose) shortcutsClose.onclick = () => toggleShortcuts(false);
+    const shortcutsModal = document.getElementById('shortcutsModal');
+    if (shortcutsModal) shortcutsModal.onclick = (e) => { if (e.target === shortcutsModal) toggleShortcuts(false); };
 
     // Header Actions & Settings
     document.getElementById('canvasTitle').onblur = (e) => { state.title = e.target.innerText; document.title = `Vibey - ${state.title}`; };
@@ -1513,10 +1538,17 @@
       else if (k === 'p') setDrawShape('pen');
       else if (k === 'r') setDrawShape('rect');
       else if (k === 'c') setDrawShape('circle');
+      else if (k === '?') toggleShortcuts();
+      else if (k === 'g') {
+        state.gridSnap = !state.gridSnap;
+        const t = document.getElementById('gridSnapToggle');
+        if (t) t.checked = state.gridSnap;
+        showToast('Grid snap ' + (state.gridSnap ? 'on' : 'off'));
+      }
       else if (k === '+' || k === '=') updateZoom(0.08, window.innerWidth / 2, window.innerHeight / 2);
       else if (k === '-' || k === '_') updateZoom(-0.08, window.innerWidth / 2, window.innerHeight / 2);
       else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); return; }
-      if (e.key === 'Escape') { closeAllPanels(); selectElement(null); if (document.body.classList.contains('preview-mode')) togglePreview(); }
+      if (e.key === 'Escape') { toggleShortcuts(false); closeAllPanels(); selectElement(null); if (document.body.classList.contains('preview-mode')) togglePreview(); }
     });
     document.addEventListener('keyup', e => {
       if (e.key.toLowerCase() === (state.lastKeyDown || '').toLowerCase()) state.lastKeyDown = null;
@@ -1553,11 +1585,24 @@
       { id: 'theme-glass', name: 'Theme: Glass', action: () => setTheme('glass') }
     ];
 
+    function toggleShortcuts(show) {
+      const m = document.getElementById('shortcutsModal');
+      if (!m) return;
+      const willShow = typeof show === 'boolean' ? show : m.classList.contains('opacity-0');
+      m.classList.toggle('opacity-0', !willShow);
+      m.classList.toggle('pointer-events-none', !willShow);
+    }
     function toggleCommandPalette() {
       const p = document.getElementById('commandPalette');
       if (!p) return;
       p.classList.toggle('opacity-0'); p.classList.toggle('pointer-events-none');
-      if (!p.classList.contains('opacity-0')) document.getElementById('commandInput').focus();
+      if (!p.classList.contains('opacity-0')) {
+        renderCommandList('');
+        document.getElementById('commandInput').focus();
+      } else {
+        const ci = document.getElementById('commandInput');
+        if (ci) ci.value = '';
+      }
     }
 
     function renderCommandList(filter) {
@@ -1600,6 +1645,10 @@
 
     document.getElementById('matchViewToggle')?.addEventListener('change', (e) => {
         state.exportMatchView = e.target.checked;
+    });
+    document.getElementById('gridSnapToggle')?.addEventListener('change', (e) => {
+        state.gridSnap = e.target.checked;
+        showToast('Grid snap ' + (state.gridSnap ? 'on' : 'off'));
     });
 
     initPanelDragging('menuPanel'); initPanelDragging('queuePanel'); initPanelDragging('layersPanel'); initPanelDragging('settingsPanel');
