@@ -813,10 +813,31 @@
       if (data.theme) applyThemeClass(data.theme);
       pushHistory();
     }
+    // ── Board file storage: OPFS device files → chrome.storage → localStorage ──
+    const AUTOSAVE_FILE = 'board.vibey.json';
+    async function opfsWriteText(name, text) {
+      if (typeof navigator === 'undefined' || !navigator.storage || !navigator.storage.getDirectory) {
+        throw new Error('no OPFS');
+      }
+      const dir = await navigator.storage.getDirectory();
+      const handle = await dir.getFileHandle(name, { create: true });
+      const w = await handle.createWritable();
+      await w.write(text);
+      await w.close();
+    }
+    async function opfsReadText(name) {
+      try {
+        if (typeof navigator === 'undefined' || !navigator.storage || !navigator.storage.getDirectory) return null;
+        const dir = await navigator.storage.getDirectory();
+        const handle = await dir.getFileHandle(name, { create: false });
+        const file = await handle.getFile();
+        return await file.text();
+      } catch (e) { return null; }
+    }
     function scheduleAutosave() {
       if (autosaveTimer) clearTimeout(autosaveTimer);
       setSaveStatus('saving');
-      autosaveTimer = setTimeout(() => {
+      autosaveTimer = setTimeout(async () => {
         autosaveTimer = null;
         let payload;
         try { payload = JSON.stringify(serializeBoard()); }
@@ -826,6 +847,8 @@
           setSaveStatus('failed');
           if (!autosaveWarned) { autosaveWarned = true; showToast('Autosave failed — board too large for storage'); }
         };
+        try { await opfsWriteText(AUTOSAVE_FILE, payload); onOk(); return; }
+        catch (e) { /* fall through to legacy backends */ }
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
           try {
             chrome.storage.local.set({ [AUTOSAVE_KEY]: payload }, () => {
@@ -853,12 +876,16 @@
           showToast('Board restored');
         } catch (e) { /* corrupt — start fresh */ }
       };
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        try { chrome.storage.local.get([AUTOSAVE_KEY], (r) => done(r && r[AUTOSAVE_KEY])); }
-        catch (e) {}
-      } else {
-        try { done(localStorage.getItem(AUTOSAVE_KEY)); } catch (e) {}
-      }
+      (async () => {
+        const fromFile = await opfsReadText(AUTOSAVE_FILE);
+        if (fromFile) { done(fromFile); return; }
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+          try { chrome.storage.local.get([AUTOSAVE_KEY], (r) => done(r && r[AUTOSAVE_KEY])); }
+          catch (e) {}
+        } else {
+          try { done(localStorage.getItem(AUTOSAVE_KEY)); } catch (e) {}
+        }
+      })();
     }
 
     // Header Actions
@@ -1373,6 +1400,32 @@
     };
 
     // Menu Panel
+    document.getElementById('menuSaveBtn').onclick = () => {
+      try {
+        const blob = new Blob([JSON.stringify(serializeBoard())], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const safe = (state.title || 'Vibey').replace(/[\\/:*?"<>|]/g, '-');
+        downloadDataUrl(safe + '.vibey.json', url);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        showToast('Backup downloaded');
+      } catch (e) { showToast('Backup failed: ' + e.message); }
+    };
+    document.getElementById('menuLoadBtn').onclick = () => document.getElementById('loadBoardInput').click();
+    document.getElementById('loadBoardInput').onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = (re) => {
+        try {
+          const data = JSON.parse(re.target.result);
+          if (UI.elements.children.length > 0 && !confirm('Replace current board?')) return;
+          restoreBoardData(data);
+          showToast('Backup loaded');
+        } catch (err) { showToast('Load failed: ' + err.message); }
+      };
+      r.readAsText(f);
+    };
     document.getElementById('menuClearBtn').onclick = () => { if(confirm('Clear entire board?')) { UI.elements.innerHTML = ''; selectElement(null); updateLayersPanel(); pushHistory(); } };
 
     // Toolbar logic
