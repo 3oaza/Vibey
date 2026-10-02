@@ -9,12 +9,16 @@ body {
   background-color: #0b0b0f;
   width: 360px;
   min-height: 100px;
+  max-height: 600px;
+  overflow-y: auto;
 }
 
 /* ── Outer wrapper ── */
 .outer {
   background-color: #0b0b0f;
   padding: 14px;
+  max-height: 600px;
+  overflow-y: auto;
 }
 
 /* ── Card ── */
@@ -100,6 +104,8 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+  max-height: 380px;
+  overflow-y: auto;
 }
 
 .img-card {
@@ -143,7 +149,9 @@ body {
   transition: opacity 0.15s ease;
 }
 
-.img-card:hover .remove-btn {
+.img-card:hover .remove-btn,
+.img-card:focus-within .remove-btn,
+.img-card .remove-btn:focus-visible {
   opacity: 1;
 }
 
@@ -183,6 +191,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .note-card {
@@ -217,8 +227,18 @@ body {
   transition: opacity 0.15s ease;
 }
 
-.note-card:hover .remove-btn {
+.note-card:hover .remove-btn,
+.note-card:focus-within .remove-btn,
+.note-card .remove-btn:focus-visible {
   opacity: 1;
+}
+
+/* Touch devices: no hover — always show remove buttons */
+@media (hover: none) {
+  .img-card .remove-btn,
+  .note-card .remove-btn {
+    opacity: 1;
+  }
 }
 
 body.theme-light .note-card {
