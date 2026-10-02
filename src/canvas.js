@@ -994,10 +994,7 @@
         }
       }
       
-      if (drawingDataURL) {
-        const draw = await loadImage(drawingDataURL);
-        ctx.drawImage(draw, -bounds.x, -bounds.y, UI.canvas.width, UI.canvas.height);
-      }
+      await drawDrawingLayer(ctx, bounds);
       
       const mimeMap = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
       return canvas.toDataURL(mimeMap[format] || 'image/png', 1.0);
@@ -1062,9 +1059,11 @@
 
           const frames  = [];
           const SAMPLE_MS = 40; // ~25fps sampling
-          const DURATION_MS = 10000; // sample for 10s to catch slow GIFs
+          const DURATION_MS = 10000; // sample for up to 10s to catch slow GIFs
+          const STABLE_MS = 2000; // stop early if nothing changed for 2s
           let lastHash  = null;
           let elapsed   = 0;
+          let lastNew   = 0;
 
           const sample = () => {
             try {
@@ -1082,6 +1081,7 @@
                 fc.getContext('2d').drawImage(img, 0, 0, w, h);
                 frames.push({ canvas: fc, delay: SAMPLE_MS });
                 lastHash = hash;
+                lastNew = elapsed;
               }
             } catch (e) {
               // CORS tainted canvas — can't read pixels, give up
@@ -1091,7 +1091,7 @@
             }
 
             elapsed += SAMPLE_MS;
-            if (elapsed < DURATION_MS) {
+            if (elapsed < DURATION_MS && (elapsed - lastNew) < STABLE_MS) {
               setTimeout(sample, SAMPLE_MS);
             } else {
               document.body.removeChild(img);
@@ -1106,6 +1106,47 @@
         img.crossOrigin = 'anonymous';
         img.src = src;
       });
+    }
+
+    let isExporting = false;
+    let exportCancelled = false;
+
+    // Frame lookup shared by GIF + video exports
+    function frameAtTime(gifEntry, timeMs) {
+      const totalMs = gifEntry.frames.reduce((s, f) => s + f.delay, 0) || 1;
+      let t = timeMs % totalMs;
+      for (const f of gifEntry.frames) {
+        if (t < f.delay) return f.canvas;
+        t -= f.delay;
+      }
+      return gifEntry.frames[gifEntry.frames.length - 1].canvas;
+    }
+
+    async function collectGifElements(assets) {
+      const gifElements = []; // { el, frames: [{canvas, delay}] }
+      for (const el of assets) {
+        const img = el.querySelector('img');
+        if (!img) continue;
+        const src = img.src || '';
+        const isGIF = src.startsWith('data:image/gif') || /\.gif(\?|$)/i.test(src);
+        if (!isGIF) continue;
+        const frames = await extractGIFFrames(src);
+        if (frames && frames.length > 1) gifElements.push({ el, img, frames });
+      }
+      return gifElements;
+    }
+
+    function longestGifLoopMs(gifElements) {
+      if (!gifElements.length) return 0;
+      return Math.max(...gifElements.map(g => g.frames.reduce((s, f) => s + f.delay, 0)));
+    }
+
+    // Strokes are recorded in board units on a 2x backing store:
+    // half size maps canvas pixels back to board units in any export ctx.
+    async function drawDrawingLayer(ctx, bounds) {
+      if (!drawingDataURL) return;
+      const draw = await loadImage(drawingDataURL);
+      ctx.drawImage(draw, -bounds.x, -bounds.y, UI.canvas.width / 2, UI.canvas.height / 2);
     }
 
     async function exportBoard(format) {
@@ -1123,8 +1164,10 @@
         ? (Math.min(maxDuration, MAX_ALLOWED) || 10) 
         : 0;
 
-      showToast(`🎬 Starting ${format.toUpperCase()} Export (${exportDuration.toFixed(1)}s)...`);
+      showToast(`🎬 Starting ${format.toUpperCase()} Export (${exportDuration.toFixed(1)}s)... (Esc cancels)`);
       btn.classList.add('export-loading');
+      isExporting = true;
+      exportCancelled = false;
       selectElement(null);
 
       try {
@@ -1143,19 +1186,7 @@
 
           // ── Step 1: extract frames from any animated GIFs on the board ──
           showToast('🔍 Analysing GIFs on board…');
-          const gifElements = []; // { el, frames: [{canvas, delay}] }
-          for (const el of assets) {
-            const img = el.querySelector('img');
-            if (!img) continue;
-            // Only try to decode if src looks like a GIF
-            const src = img.src || '';
-            const isGIF = src.startsWith('data:image/gif') || /\.gif(\?|$)/i.test(src);
-            if (!isGIF) continue;
-            const frames = await extractGIFFrames(src);
-            if (frames && frames.length > 1) {
-              gifElements.push({ el, img, frames });
-            }
-          }
+          const gifElements = await collectGifElements(assets);
 
           const hasAnimated = gifElements.length > 0;
           const hasVideos   = assets.some(el => el.querySelector('video'));
@@ -1165,11 +1196,11 @@
           const frameDelay = 1000 / fps; // 100ms per frame
           let totalFrames  = 100; // default: always 10 seconds (10fps × 100 = 10s)
 
-          if (hasAnimated && !hasVideos) {
+          if (!hasAnimated && !hasVideos) {
+            totalFrames = 1; // static board: a single frame is enough
+          } else if (hasAnimated && !hasVideos) {
             // Drive duration by the longest GIF loop, minimum 10s
-            const longestLoopMs = Math.max(
-              ...gifElements.map(g => g.frames.reduce((s, f) => s + f.delay, 0))
-            );
+            const longestLoopMs = longestGifLoopMs(gifElements);
             totalFrames = Math.max(Math.floor(Math.max(longestLoopMs, 10000) / frameDelay), 100);
           } else if (hasVideos) {
             totalFrames = Math.max(Math.floor(exportDuration * fps), 100);
@@ -1191,22 +1222,16 @@
           captureCanvas.height = height;
           const ctx = captureCanvas.getContext('2d');
 
-          // Pre-build per-GIF frame index lookup
-          // frameAtTime(gifEntry, timeMs) → canvas for that GIF at the given time
-          function frameAtTime(gifEntry, timeMs) {
-            const totalMs = gifEntry.frames.reduce((s, f) => s + f.delay, 0);
-            let t = timeMs % totalMs;
-            for (const f of gifEntry.frames) {
-              if (t < f.delay) return f.canvas;
-              t -= f.delay;
-            }
-            return gifEntry.frames[gifEntry.frames.length - 1].canvas;
-          }
-
           // ── Step 4: render each output frame ──
+          const progressEvery = Math.max(1, Math.floor(totalFrames / 10));
           for (let i = 0; i < totalFrames; i++) {
+            if (exportCancelled) {
+              showToast('Export cancelled');
+              btn.classList.remove('export-loading');
+              return;
+            }
             const timeMs = i * frameDelay;
-            showToast(`🎞️ Frame ${i + 1}/${totalFrames}`);
+            if (i % progressEvery === 0 || i === totalFrames - 1) showToast(`🎞️ Frame ${i + 1}/${totalFrames}`);
 
             // Seek videos if any
             if (hasVideos) {
@@ -1262,8 +1287,7 @@
             }
 
             if (drawingDataURL) {
-              const draw = await loadImage(drawingDataURL);
-              ctx.drawImage(draw, -bounds.x, -bounds.y, UI.canvas.width, UI.canvas.height);
+              await drawDrawingLayer(ctx, bounds);
             }
             ctx.restore();
 
@@ -1296,9 +1320,20 @@
         }
 
         if (format === 'mp4') {
+          showToast('Analysing GIFs on board…');
+          const gifElements = await collectGifElements(assets);
+          const hasAnimated = gifElements.length > 0;
+          const hasVideos = assets.some(el => el.querySelector('video'));
+          // Static board: short clip instead of 10s of identical frames
+          const mp4Duration = hasVideos ? exportDuration
+            : (hasAnimated ? Math.max(longestGifLoopMs(gifElements) / 1000, 3) : 3);
+
           const captureCanvas = document.createElement('canvas');
-          captureCanvas.width = bounds.width * 2;
-          captureCanvas.height = bounds.height * 2;
+          // Cap size: uncapped huge boards kill the recorder
+          const mp4MaxDim = 1280;
+          const vs = Math.max(0.1, Math.min(2, mp4MaxDim / Math.max(bounds.width, bounds.height)));
+          captureCanvas.width = Math.floor(bounds.width * vs);
+          captureCanvas.height = Math.floor(bounds.height * vs);
           const ctx = captureCanvas.getContext('2d');
 
           // Pick best supported codec
@@ -1310,6 +1345,11 @@
           const chunks = [];
           recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
           recorder.onstop = () => {
+            if (exportCancelled) {
+              showToast('Export cancelled');
+              btn.classList.remove('export-loading');
+              return;
+            }
             // Save as .webm (browsers record webm, not mp4)
             const blob = new Blob(chunks, { type: 'video/webm' });
             downloadDataUrl(`${state.title || 'Vibey'}.webm`, URL.createObjectURL(blob));
@@ -1322,23 +1362,32 @@
           const startTime = Date.now();
           
           const recordLoop = () => {
-            if (Date.now() - startTime > exportDuration * 1000) { recorder.stop(); return; }
+            if (exportCancelled) { recorder.stop(); return; }
+            const timeMs = Date.now() - startTime;
+            if (timeMs > mp4Duration * 1000) { recorder.stop(); return; }
             // FIX: reset transform each frame instead of accumulating scale(2,2)
-            ctx.setTransform(2, 0, 0, 2, 0, 0);
+            ctx.setTransform(vs, 0, 0, vs, 0, 0);
             ctx.fillStyle = '#08080a'; ctx.fillRect(0, 0, bounds.width, bounds.height);
-            for (const el of assets) {
+            for (const el of UI.elements.children) {
               const left = (parseFloat(el.style.left) || 0) - bounds.x;
               const top = (parseFloat(el.style.top) || 0) - bounds.y;
+              const elW = el.offsetWidth || 280;
+              const elH = el.offsetHeight || 200;
+              const gifEntry = gifElements.find(g => g.el === el);
+              if (gifEntry) {
+                ctx.drawImage(frameAtTime(gifEntry, timeMs), left, top, elW, elH);
+                continue;
+              }
               const img = el.querySelector('img'); const video = el.querySelector('video'); const txt = el.querySelector('.board-text');
-              if (img) ctx.drawImage(img, left, top, el.offsetWidth || 280, el.offsetHeight || 200);
-              else if (video) ctx.drawImage(video, left, top, el.offsetWidth || 320, el.offsetHeight || 180);
+              if (img) ctx.drawImage(img, left, top, elW, elH);
+              else if (video) ctx.drawImage(video, left, top, elW, elH);
               else if (txt) {
                 ctx.fillStyle = '#fff'; ctx.font = '600 24px Segoe UI'; ctx.textBaseline = 'top';
                 const lines = txt.innerText.split('\n');
                 lines.forEach((line, idx) => ctx.fillText(line, left + 8, top + 8 + idx * 30));
               }
             }
-            if (drawingImg) ctx.drawImage(drawingImg, -bounds.x, -bounds.y, UI.canvas.width, UI.canvas.height);
+            if (drawingImg) ctx.drawImage(drawingImg, -bounds.x, -bounds.y, UI.canvas.width / 2, UI.canvas.height / 2);
             requestAnimationFrame(recordLoop);
           };
           recordLoop();
@@ -1353,6 +1402,7 @@
         showToast('❌ Export error: ' + e.message);
         btn.classList.remove('export-loading');
       } finally {
+        isExporting = false;
         if (format !== 'gif' && format !== 'mp4') btn.classList.remove('export-loading');
       }
     }
@@ -1569,7 +1619,7 @@
       else if (k === '+' || k === '=') updateZoom(0.08, window.innerWidth / 2, window.innerHeight / 2);
       else if (k === '-' || k === '_') updateZoom(-0.08, window.innerWidth / 2, window.innerHeight / 2);
       else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); return; }
-      if (e.key === 'Escape') { toggleShortcuts(false); closeAllPanels(); selectElement(null); if (document.body.classList.contains('preview-mode')) togglePreview(); }
+      if (e.key === 'Escape') { if (isExporting) exportCancelled = true; toggleShortcuts(false); closeAllPanels(); selectElement(null); if (document.body.classList.contains('preview-mode')) togglePreview(); }
     });
     document.addEventListener('keyup', e => {
       if (e.key.toLowerCase() === (state.lastKeyDown || '').toLowerCase()) state.lastKeyDown = null;
