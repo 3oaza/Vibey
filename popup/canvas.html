@@ -52,7 +52,17 @@
     body.theme-light #zoomLabel { color: rgba(23, 26, 33, 0.55); }
     body.theme-light .group-layer { border-color: rgba(20, 25, 40, 0.25); }
     body.theme-light #toast { background: rgba(109, 107, 255, 0.12); border-color: rgba(109, 107, 255, 0.4); color: #4a48c7; }
+    body.theme-light #commandPalette { background: rgba(255,255,255,0.92); border-color: rgba(20,25,40,0.1); }
     body.theme-light #commandPalette input { color: #171a21; }
+    body.theme-light #penPopover { background: rgba(255,255,255,0.92); border-color: rgba(20,25,40,0.1); }
+    body.theme-light .queue-item .add-overlay { background: rgba(109,107,255,0.18); color: #4a48c7; }
+    body.theme-light .toolbar-right, body.theme-light .zoom-nav, body.theme-light #dock { background: rgba(255,255,255,0.82); border-color: rgba(20,25,40,0.1); }
+    body.theme-light .side-panel, body.theme-light .modal-menu { background: rgba(255,255,255,0.9); }
+    @media (max-width: 1100px) {
+      #layersPanel { left: 24px !important; }
+      #settingsPanel { left: 24px !important; }
+      #queuePanel { left: 24px !important; }
+    }
     body.theme-glass { --glass: rgba(255, 255, 255, 0.06); --panel-bg: rgba(18, 18, 24, 0.45); }
     body.theme-glass header { background: rgba(8, 8, 10, 0.45); }
     body.theme-glass .side-panel, body.theme-glass .modal-menu, body.theme-glass .toolbar-right, body.theme-glass .zoom-nav { backdrop-filter: blur(60px); }
@@ -88,8 +98,8 @@
     .modal-item { padding: 10px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 10px; color: #94a3b8; transition: background 0.15s, color 0.15s, transform 0.15s; }
     .modal-item:hover { background: rgba(255, 255, 255, 0.05); color: white; transform: translateX(2px); }
 
-    /* Toast */
-    #toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(20px) scale(0.9); background: rgba(139, 137, 255, 0.15); border: 1px solid rgba(139, 137, 255, 0.4); color: #c4c3ff; font-size: 12px; font-weight: 600; padding: 8px 20px; border-radius: 99px; z-index: 3000; opacity: 0; transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); pointer-events: none; white-space: nowrap; backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgba(139, 137, 255, 0.25); }
+    /* Toast — above dock (dock ~40px at bottom:24 = top edge ~64; shapes menu at bottom:88) */
+    #toast { position: fixed; bottom: 104px; left: 50%; transform: translateX(-50%) translateY(20px) scale(0.9); background: rgba(139, 137, 255, 0.15); border: 1px solid rgba(139, 137, 255, 0.4); color: #c4c3ff; font-size: 12px; font-weight: 600; padding: 8px 20px; border-radius: 99px; z-index: 3000; opacity: 0; transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); pointer-events: none; white-space: nowrap; backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgba(139, 137, 255, 0.25); max-width: 80vw; overflow: hidden; text-overflow: ellipsis; }
     #toast.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 
     /* Buttons */

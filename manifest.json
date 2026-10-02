@@ -31,7 +31,6 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "popup/canvas.html",
         "assets/icons/*",
         "src/gif.worker.js"
       ],

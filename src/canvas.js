@@ -73,14 +73,17 @@
     }
 
     function updateDrawingLayerPosition() {
+      if (!UI.canvas || !UI.elements) return;
       UI.canvas.style.zIndex = state.drawingLayerOnTop ? '999' : '5';
-      UI.elements.style.zIndex = state.drawingLayerOnTop ? '10' : '10';
+      UI.elements.style.zIndex = '10';
     }
 
     function selectDrawingLayer() {
       state.selectedId = null;
+      state.selectedIds = [];
       state.selectedSpecialLayer = 'drawing';
       document.querySelectorAll('.board-item').forEach(el => el.classList.remove('selected'));
+      applySelection();
       updateLayersPanel();
     }
 
@@ -92,8 +95,9 @@
 
     function initPanelDragging(panelId) {
       const panel = document.getElementById(panelId);
+      if (!panel) return;
       const handle = panel.querySelector('.panel-header');
-      if (!panel || !handle) return;
+      if (!handle) return;
       let dragState = null;
       handle.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
@@ -155,6 +159,9 @@
       dotsCtx.clearRect(0, 0, w, h);
       const gap = DOTS_GAP * state.zoom;
       if (gap < 7) return; // zoomed far out: hide grid like Figma/Miro
+      // perf guard: skip glow pass on huge grids
+      const est = (w / Math.max(1, gap)) * (h / Math.max(1, gap));
+      const useGlow = est < 6000;
       const isLight = document.body.classList.contains('theme-light');
       // Dot size grows with zoom, so zoom-in looks different from zoom-out
       const r = Math.min(3.2, Math.max(1, 1.1 * state.zoom));
@@ -173,7 +180,7 @@
           const dx = sx - dotsMouse.x, dy = sy - dotsMouse.y;
           const d2 = dx * dx + dy * dy;
           dotsCtx.beginPath();
-          if (d2 < glowR * glowR) {
+          if (useGlow && d2 < glowR * glowR) {
             const t = 1 - Math.sqrt(d2) / glowR; // 0..1 near cursor
             dotsCtx.fillStyle = `rgba(139,137,255,${(0.12 * fade + t * 0.3).toFixed(3)})`;
             dotsCtx.arc(sx, sy, r + t * 0.8, 0, 6.2832);
@@ -328,13 +335,19 @@
       });
 
       const selEl = state.selectedId ? document.getElementById(state.selectedId) : null;
-      const isText = selEl?.dataset.layerType === 'text' || selEl?.dataset.layerType === 'sticky';
-      document.getElementById('textSettings').style.display = isText ? 'block' : 'none';
-      if (isText) {
+      const isText = !!selEl && (selEl.dataset.layerType === 'text' || selEl.dataset.layerType === 'sticky');
+      const textSettings = document.getElementById('textSettings');
+      if (textSettings) textSettings.style.display = isText ? 'block' : 'none';
+      if (isText && selEl) {
         const txt = selEl.querySelector('.board-text, .sticky-text');
-        document.getElementById('fontFamily').value = txt.style.fontFamily || '';
-        document.getElementById('fontSize').value = parseInt(txt.style.fontSize) || 24;
-        document.getElementById('textColor').value = rgbToHex(txt.style.color) || '#ffffff';
+        if (txt) {
+          const ff = document.getElementById('fontFamily');
+          if (ff) ff.value = txt.style.fontFamily || '';
+          const fs = document.getElementById('fontSize');
+          if (fs) fs.value = parseInt(txt.style.fontSize) || 24;
+          const tc = document.getElementById('textColor');
+          if (tc) tc.value = rgbToHex(txt.style.color) || '#ffffff';
+        }
       }
 
       updateLayersPanel();
@@ -342,7 +355,8 @@
       positionTextToolbar();
     }
     function selectIds(ids) {
-      state.selectedIds = [...new Set(ids)];
+      const live = (ids || []).filter(id => id && document.getElementById(id));
+      state.selectedIds = [...new Set(live)];
       state.selectedId = state.selectedIds[state.selectedIds.length - 1] || null;
       state.selectedSpecialLayer = null;
       applySelection();
@@ -382,6 +396,7 @@
       const hits = [];
       Array.from(UI.elements.children).forEach(el => {
         if (!el.classList || !el.classList.contains('board-item')) return;
+        if (el.style.display === 'none') return;
         const ex = parseFloat(el.style.left) || 0, ey = parseFloat(el.style.top) || 0;
         const ew = el.offsetWidth || 0, eh = el.offsetHeight || 0;
         if (ex < bx.x && ex + ew > ax.x && ey < bx.y && ey + eh > ax.y) hits.push(el.id);
@@ -389,10 +404,64 @@
       selectIds([...marquee.base, ...hits]);
     }
 
+    let activeDrag = null;
+    let activeResize = null;
+    if (!window.__vibeyDragBound) {
+      window.__vibeyDragBound = true;
+      window.addEventListener('mousemove', (e) => {
+        if (activeDrag) {
+          const { start, movedRef, els } = activeDrag;
+          let dx = (e.clientX - start.x) / state.zoom;
+          let dy = (e.clientY - start.y) / state.zoom;
+          if (dx || dy) activeDrag.moved = true;
+          const first = els.length ? document.getElementById(els[0]) : null;
+          const base = first && first._dragStartPos;
+          if (state.gridSnap && state.zoom * state.gridSize >= 7 && base) {
+            dx = Math.round((base.x + dx) / state.gridSize) * state.gridSize - base.x;
+            dy = Math.round((base.y + dy) / state.gridSize) * state.gridSize - base.y;
+          }
+          state.selectedIds.forEach(id => {
+            const item = document.getElementById(id);
+            if (item && item._dragStartPos) {
+              item.style.left = item._dragStartPos.x + dx + 'px';
+              item.style.top  = item._dragStartPos.y + dy + 'px';
+            }
+          });
+          updateSelectionFrame();
+        }
+        if (activeResize) {
+          const { el, startSize } = activeResize;
+          if (!document.contains(el)) { activeResize = null; return; }
+          const dx = (e.clientX - startSize.x) / state.zoom;
+          const dy = (e.clientY - startSize.y) / state.zoom;
+          el.style.width = Math.max(40, startSize.w + dx) + 'px';
+          el.style.height = Math.max(40, startSize.h + dy) + 'px';
+          updateSelectionFrame();
+        }
+      });
+      window.addEventListener('mouseup', () => {
+        if (activeDrag) {
+          const { el, moved } = activeDrag;
+          activeDrag = null;
+          try { el.classList.remove('dragging'); } catch (e) {}
+          state.selectedIds.forEach(id => {
+            const item = document.getElementById(id);
+            if (item) delete item._dragStartPos;
+          });
+          if (moved) pushHistory();
+        }
+        if (activeResize) {
+          const done = activeResize.moved;
+          activeResize = null;
+          if (done) pushHistory();
+        }
+        if (frameResize) { /* handled by existing frame-resize mouseup below */ }
+      });
+    }
     function makeDraggable(el) {
-      let isDragging = false;
-      let moved = false;
-      let start = { x: 0, y: 0 };
+      if (el._vibeyDragBound) return;
+      el._vibeyDragBound = true;
+      const start = { x: 0, y: 0 };
       el.addEventListener('mousedown', (e) => {
         if (state.tool !== 'select' || e.target.classList.contains('resizer')) return;
         if (el.dataset.diagramChild) return; // diagram parts move with their group
@@ -403,10 +472,10 @@
         if (state.lastKeyDown === 'e') { pickColor(e); return; }
         const txt = e.target.closest('.board-text');
         if (txt && document.activeElement === txt) return;
-        isDragging = true;
         selectElement(el.id, e.ctrlKey || e.metaKey);
         start.x = e.clientX;
         start.y = e.clientY;
+        activeDrag = { el, start: { x: start.x, y: start.y }, els: [...state.selectedIds], moved: false };
         state.selectedIds.forEach(id => {
           const item = document.getElementById(id);
           if (item) {
@@ -419,67 +488,22 @@
         el.classList.add('dragging');
         e.stopPropagation();
       });
-      window.addEventListener('mousemove', (e) => {
-        if (!isDragging) return;
-        let dx = (e.clientX - start.x) / state.zoom;
-        let dy = (e.clientY - start.y) / state.zoom;
-        if (dx || dy) moved = true;
-        // Snap only while the grid is actually visible (dots fade out when zoomed far out)
-        if (state.gridSnap && state.zoom * state.gridSize >= 7 && el._dragStartPos) {
-          // Snap the shared delta once so multi-select keeps its offsets
-          dx = Math.round((el._dragStartPos.x + dx) / state.gridSize) * state.gridSize - el._dragStartPos.x;
-          dy = Math.round((el._dragStartPos.y + dy) / state.gridSize) * state.gridSize - el._dragStartPos.y;
-        }
-        state.selectedIds.forEach(id => {
-          const item = document.getElementById(id);
-          if (item && item._dragStartPos) {
-            item.style.left = item._dragStartPos.x + dx + 'px';
-            item.style.top  = item._dragStartPos.y + dy + 'px';
-          }
-        });
-        updateSelectionFrame();
-      });
-      window.addEventListener('mouseup', () => {
-        if (isDragging) {
-          isDragging = false;
-          el.classList.remove('dragging');
-          state.selectedIds.forEach(id => {
-            const item = document.getElementById(id);
-            if (item) delete item._dragStartPos;
-          });
-          if (moved) { moved = false; pushHistory(); }
-        }
-      });
+      // delegated via global singleton (see activeDrag)
+      void 0;
     }
 
     function makeResizable(el) {
       const resizer = el.querySelector('.resizer');
-      if (!resizer) return;
-      let isResizing = false;
-      let startSize = { w: 0, h: 0, x: 0, y: 0 };
-      
+      if (!resizer || resizer._vibeyResizeBound) return;
+      resizer._vibeyResizeBound = true;
       resizer.addEventListener('mousedown', (e) => {
-        isResizing = true;
-        startSize = {
-          w: el.offsetWidth,
-          h: el.offsetHeight,
-          x: e.clientX,
-          y: e.clientY
+        activeResize = {
+          el,
+          moved: true,
+          startSize: { w: el.offsetWidth, h: el.offsetHeight, x: e.clientX, y: e.clientY }
         };
         e.stopPropagation();
         e.preventDefault();
-      });
-
-      window.addEventListener('mousemove', (e) => {
-        if (!isResizing) return;
-        const dx = (e.clientX - startSize.x) / state.zoom;
-        const dy = (e.clientY - startSize.y) / state.zoom;
-        el.style.width = Math.max(40, startSize.w + dx) + 'px';
-        el.style.height = Math.max(40, startSize.h + dy) + 'px';
-      });
-
-      window.addEventListener('mouseup', () => {
-        isResizing = false;
       });
     }
 
@@ -663,8 +687,10 @@
       return null;
     }
     function syncTextToolbar(txt) {
+      if (!txt) return;
       const size = parseInt(txt.style.fontSize) || 24;
-      document.getElementById('ttSize').value = size;
+      const ttSize = document.getElementById('ttSize');
+      if (ttSize) ttSize.value = size;
       const fw = txt.style.fontWeight;
       document.getElementById('ttBold').classList.toggle('active', fw === '700' || fw === '800' || fw === 'bold');
       document.getElementById('ttItalic').classList.toggle('active', txt.style.fontStyle === 'italic');
@@ -673,8 +699,10 @@
         document.getElementById('ttAlign' + a).classList.toggle('active', align === a.toLowerCase());
       });
       const c = rgbToHex(txt.style.color) || '#ffffff';
-      document.getElementById('ttColor').value = c;
-      document.querySelector('.tt-color').style.borderBottomColor = c;
+      const ttC = document.getElementById('ttColor');
+      if (ttC) ttC.value = c;
+      const ttc = document.querySelector('.tt-color');
+      if (ttc) ttc.style.borderBottomColor = c;
       const fs = document.getElementById('fontSize'); if (fs) fs.value = size;
       const tc = document.getElementById('textColor'); if (tc) tc.value = c;
     }
@@ -685,7 +713,8 @@
       if (!txt || state.tool !== 'select') { bar.classList.remove('visible'); return; }
       syncTextToolbar(txt);
       bar.classList.add('visible');
-      const host = document.getElementById(state.selectedId);
+      const host = state.selectedId ? document.getElementById(state.selectedId) : null;
+      if (!host || !document.contains(host)) { bar.classList.remove('visible'); return; }
       const r = host.getBoundingClientRect();
       const bw = bar.offsetWidth, bh = bar.offsetHeight;
       let left = r.left + r.width / 2 - bw / 2;
@@ -820,11 +849,25 @@
       }
       UI.elements.appendChild(el);
       syncElementStack();
-      makeDraggable(el);
-      makeResizable(el);
+      // diagram children get listeners via group; avoid dead per-child window handlers
+      if (!el.dataset.diagramChild) { makeDraggable(el); makeResizable(el); }
+      if (type === 'video') {
+        const v = el.querySelector('video');
+        if (v) {
+          try {
+            v.muted = true;
+            const pr = v.play && v.play();
+            if (pr && pr.catch) pr.catch(() => {});
+          } catch (e) {}
+        }
+      }
+      if (type === 'text') {
+        const tx = el.querySelector('.board-text');
+        if (tx && !tx.innerText.trim()) tx.innerText = 'Type something...';
+      }
       selectElement(el.id);
       updateLayersPanel();
-      pushHistory();
+      if (!isRestoringHistory) pushHistory();
       return el;
     }
 
@@ -877,8 +920,8 @@
     }
 
     async function pickColor(e) {
-      const target = e.target.closest('img');
-      if (!target) return;
+      const target = e.target && e.target.closest ? e.target.closest('img') : null;
+      if (!target) { showToast('Eyedropper works on images'); return; }
       const canvas = document.createElement('canvas');
       canvas.width = 1; canvas.height = 1;
       const ctx = canvas.getContext('2d');
@@ -887,11 +930,22 @@
       const ry = (e.clientY - rect.top) / (rect.height / target.naturalHeight);
       try {
         const tempImg = await loadImage(target.src);
-        ctx.drawImage(tempImg, rx, ry, 1, 1, 0, 0, 1, 1);
+        // account for object-fit:contain letterboxing
+        const rect = target.getBoundingClientRect();
+        const natW = tempImg.naturalWidth || target.naturalWidth || 1;
+        const natH = tempImg.naturalHeight || target.naturalHeight || 1;
+        const scale = Math.min(rect.width / natW, rect.height / natH);
+        const drawnW = natW * scale, drawnH = natH * scale;
+        const offX = (rect.width - drawnW) / 2, offY = (rect.height - drawnH) / 2;
+        const px = e.clientX - rect.left - offX, py = e.clientY - rect.top - offY;
+        if (px < 0 || py < 0 || px > drawnW || py > drawnH) { showToast('Click on the image itself'); return; }
+        const sx = px / scale, sy = py / scale;
+        ctx.drawImage(tempImg, sx, sy, 1, 1, 0, 0, 1, 1);
         const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
         const hex = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
         showToast(`Color: ${hex}`);
-        navigator.clipboard.writeText(hex);
+        try { await navigator.clipboard.writeText(hex); }
+        catch (cerr) { showToast(`Color: ${hex} (copy blocked)`); }
       } catch (err) { showToast('Cannot pick color (CORS)'); }
     }
 
@@ -965,6 +1019,7 @@
     function pushSmoothPoint(x, y) {
       const s = activeStroke;
       if (!s) return;
+      s._n = (s._n || 0) + 1;
       // Stabilization: heavier easing kills hand shake while drawing
       s.smooth.x += (x - s.smooth.x) * 0.45;
       s.smooth.y += (y - s.smooth.y) * 0.45;
@@ -973,7 +1028,17 @@
       if (Math.hypot(px - prev.x, py - prev.y) < 1.2 / s.zoom) return; // jitter filter
       s.pts.push({ x: px, y: py });
       s.moved = true;
-      layoutLiveStroke(s, s.pts);
+      if (s._n % 3 === 0 || s.pts.length < 10) layoutLiveStroke(s, s.pts);
+      else {
+        // cheap incremental update: extend path without recomputing bounds
+        try {
+          const last = s.pts[s.pts.length-1];
+          const prev = s.pts[s.pts.length-2];
+          const mx = ((prev.x + last.x)/2).toFixed(2), my = ((prev.y + last.y)/2).toFixed(2);
+          const d = s.path.getAttribute('d') || '';
+          s.path.setAttribute('d', d + ' Q ' + prev.x.toFixed(2) + ' ' + prev.y.toFixed(2) + ' ' + mx + ' ' + my);
+        } catch (e) { layoutLiveStroke(s, s.pts); }
+      }
     }
     function chaikinSmooth(pts) {
       if (pts.length < 3) return pts;
@@ -1407,6 +1472,7 @@
     let erasing = false, erasedAny = false, lastErase = null;
     let eraseCandidates = [], eraseBoxes = new Map();
     function eraserSize() { return (brushBaseSize() * 2) / state.zoom; }
+    function brushScreenSize() { return brushBaseSize(); }
     function beginEraseSession() {
       erasedAny = false;
       eraseCandidates = Array.from(UI.elements.children).filter(el =>
@@ -1436,6 +1502,7 @@
         return false;
       } catch (e) { return true; }
     }
+    let eraseBitmapTouched = false;
     function eraseAt(bx, by) {
       for (let i = eraseCandidates.length - 1; i >= 0; i--) {
         const el = eraseCandidates[i];
@@ -1450,20 +1517,26 @@
         }
       }
       const ctx = UI.ctx;
+      // drawing canvas backing is 2x screen pixels; board->screen scale = zoom, then x2 backing
+      const r = eraserSize() * state.zoom * 2;
+      // convert board coords to canvas backing pixels: screen = board*zoom+pan, backing = screen*2
+      const cx = (bx * state.zoom + state.panX) * 2;
+      const cy = (by * state.zoom + state.panY) * 2;
       ctx.save();
       ctx.globalCompositeOperation = 'destination-out';
       ctx.beginPath();
-      ctx.arc(bx, by, eraserSize(), 0, 6.2832);
+      ctx.arc(cx, cy, Math.max(2, r), 0, 6.2832);
       ctx.fill();
       ctx.restore();
-      erasedAny = true;
+      eraseBitmapTouched = true;
       lastErase = { x: bx, y: by };
     }
     function eraseTo(bx, by) {
       const from = lastErase || { x: bx, y: by };
       const step = Math.max(1, eraserSize() / 3);
       const dx = bx - from.x, dy = by - from.y;
-      const n = Math.min(60, Math.floor(Math.hypot(dx, dy) / step));
+      const dist = Math.hypot(dx, dy);
+      const n = Math.min(400, Math.max(1, Math.floor(dist / step)));
       for (let i = 1; i <= n; i++) eraseAt(from.x + dx * i / n, from.y + dy * i / n);
       eraseAt(bx, by);
     }
@@ -1608,7 +1681,9 @@
       if (state.isPanning) { state.isPanning = false; panSession = null; UI.board.classList.remove('panning'); }
       if (erasing) {
         erasing = false; lastErase = null;
-        if (erasedAny) { erasedAny = false; selectElement(null); saveDrawing(); pushHistory(); showToast('Erased'); }
+        const did = erasedAny || eraseBitmapTouched;
+        erasedAny = false; eraseBitmapTouched = false;
+        if (did) { selectElement(null); saveDrawing(); pushHistory(); showToast('Erased'); }
       }
     });
 
@@ -1674,7 +1749,7 @@
       const items = Array.from(UI.elements.children).reverse();
       if (count) count.textContent = items.length + 1;
       
-      let html = `<div class="layer-item ${state.selectedSpecialLayer === 'drawing' ? 'active' : ''}" onclick="selectDrawingLayer()">
+      let html = `<div class="layer-item ${state.selectedSpecialLayer === 'drawing' ? 'active' : ''}" data-layer-action="drawing">
         <span class="layer-name">Drawing Layer</span>
       </div>`;
       
@@ -1683,16 +1758,35 @@
         const eye = hidden
           ? '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.6 6.6C3.8 8.3 2 12 2 12s3.5 7 10 7c1.5 0 2.9-.4 4.1-.9"/></svg>'
           : '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
-        html += `<div class="layer-item ${state.selectedIds.includes(el.id) ? 'active' : ''}" onclick="selectElement('${el.id}')">
-          <span class="layer-name">${el.dataset.layerName || 'Layer'}</span>
+        html += `<div class="layer-item ${state.selectedIds.includes(el.id) ? 'active' : ''}" data-layer-id="${el.id}">
+          <span class="layer-name">${escapeHtmlAttr(el.dataset.layerName || 'Layer')}</span>
           <span class="layer-reorder">
-            <button class="icon-btn" title="${hidden ? 'Show layer' : 'Hide layer'}" onclick="event.stopPropagation(); toggleLayerVisibility('${el.id}')">${eye}</button>
-            <button class="icon-btn" title="Delete layer" onclick="event.stopPropagation(); deleteLayer('${el.id}')">×</button>
+            <button class="icon-btn" title="${hidden ? 'Show layer' : 'Hide layer'}" data-layer-visibility="${el.id}">${eye}</button>
+            <button class="icon-btn" title="Delete layer" data-layer-delete="${el.id}">×</button>
           </span>
         </div>`;
       });
       list.innerHTML = html;
+      if (!list._vibeyLayersBound) {
+        list._vibeyLayersBound = true;
+        list.addEventListener('click', (e) => {
+          const v = e.target.closest && e.target.closest('[data-layer-visibility]');
+          if (v) { e.stopPropagation(); toggleLayerVisibility(v.getAttribute('data-layer-visibility')); return; }
+          const d = e.target.closest && e.target.closest('[data-layer-delete]');
+          if (d) { e.stopPropagation(); deleteLayer(d.getAttribute('data-layer-delete')); return; }
+          const row = e.target.closest && e.target.closest('[data-layer-id]');
+          if (row) { selectElement(row.getAttribute('data-layer-id')); return; }
+          const dr = e.target.closest && e.target.closest('[data-layer-action="drawing"]');
+          if (dr) selectDrawingLayer();
+        });
+      }
+      try {
+        window.selectElement = selectElement; window.selectIds = selectIds;
+        window.selectDrawingLayer = selectDrawingLayer; window.toggleLayerVisibility = toggleLayerVisibility;
+        window.deleteLayer = deleteLayer; window.moveLayerPosition = moveLayerPosition;
+      } catch (e) {}
     }
+    function escapeHtmlAttr(v) { return String(v==null?'':v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
     function moveLayerPosition(direction) {
       if (!state.selectedId) return;
@@ -1727,7 +1821,9 @@
        // Panel events handled via inline onclick for simplicity in this version
     }
 
+    function hidePenPopoverSafe() { try { document.getElementById('penPopover')?.classList.remove('visible'); } catch (e) {} }
     function closeAllPanels(exceptId) {
+      try { if (exceptId !== 'penPopover') hidePenPopoverSafe(); } catch (e) {}
       document.querySelectorAll('.side-panel.visible').forEach(p => {
         if (p.id !== exceptId) p.classList.remove('visible');
       });
@@ -1845,21 +1941,36 @@
     let historyStack = [];
     let historyIndex = -1;
     let isRestoringHistory = false;
+    const HISTORY_LIMIT = 30;
+    function sanitizeBoardHTML(html) {
+      if (typeof html !== 'string') return '';
+      if (html.length > 20 * 1024 * 1024) throw new Error('Board too large');
+      // strip scripts, inline event handlers, javascript: URLs
+      let out = html.replace(/<script[\s\S]*?<\/script\s*>/gi, '');
+      out = out.replace(/\s+on[a-zA-Z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/g, '');
+      out = out.replace(/(href|src|xlink:href)\s*=\s*("|')\s*javascript:[^"']*\2/gi, '$1=$2#$2');
+      return out;
+    }
     function snapshotBoard() {
       return { html: UI.elements.innerHTML, drawing: drawingDataURL };
     }
     function pushHistory() {
       if (isRestoringHistory) return;
+      const snap = snapshotBoard();
+      const prev = historyStack[historyIndex];
+      if (prev && prev.html === snap.html && prev.drawing === snap.drawing) return;
       historyStack = historyStack.slice(0, historyIndex + 1);
-      historyStack.push(snapshotBoard());
-      if (historyStack.length > 50) historyStack.shift();
+      historyStack.push(snap);
+      if (historyStack.length > HISTORY_LIMIT) historyStack.shift();
       historyIndex = historyStack.length - 1;
       scheduleAutosave();
     }
     function restoreSnapshot(snap) {
       isRestoringHistory = true;
       try {
-        UI.elements.innerHTML = snap.html || '';
+        let html = '';
+        try { html = sanitizeBoardHTML(snap.html || ''); } catch (e) { html = ''; }
+        UI.elements.innerHTML = html;
         drawingDataURL = snap.drawing || null;
         const ctx = UI.ctx;
         ctx.clearRect(0, 0, UI.canvas.width, UI.canvas.height);
@@ -1894,8 +2005,18 @@
       showToast('Redone');
     }
     function deleteSelected() {
-      if (!state.selectedIds.length) return;
-      state.selectedIds.forEach(id => document.getElementById(id)?.remove());
+      if (!state.selectedIds.length && !state.selectedId) return;
+      const ids = state.selectedIds.length ? [...state.selectedIds] : (state.selectedId ? [state.selectedId] : []);
+      const groups = new Set();
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const g = el.closest ? el.closest('.group-layer') : null;
+        if (g) groups.add(g);
+        el.remove();
+      });
+      groups.forEach(g => { if (document.contains(g)) { try { expandGroupToFit(g); } catch (e) {} } });
+      try { document.getElementById('nodeButtons')?.classList.remove('visible'); } catch (e) {}
       selectElement(null);
       pushHistory();
     }
@@ -1907,6 +2028,13 @@
         const t = document.getElementById(id);
         if (!t) return;
         const c = t.cloneNode(true);
+        if (c.dataset && (c.dataset.diagramRole === 'branch' || c.dataset.diagramRole === 'wire') && !t.closest('.group-layer')) {
+          // standalone clone keeps role only if parent was group; top-level clone of child loses group context
+        }
+        if (c.dataset && c.dataset.diagramChild && !document.contains(t.closest?.('.group-layer'))) {
+          // cloned top-level child of diagram: drop child marker so it becomes draggable
+          try { delete c.dataset.diagramChild; } catch (e) {}
+        }
         const nid = 'el-' + createId();
         c.id = nid;
         c.style.left = ((parseFloat(t.style.left) || 0) + 24) + 'px';
@@ -1982,11 +2110,12 @@
       }
       drawDots();
       showToast(name === 'light' ? 'Light mode' : name === 'glass' ? 'Glass mode' : 'Dark mode');
+      try { scheduleAutosave(); } catch (e) {}
     }
     function toggleTheme() {
       const cur = document.body.classList.contains('theme-light') ? 'light'
         : document.body.classList.contains('theme-glass') ? 'glass' : 'dark';
-      setTheme(cur === 'dark' ? 'light' : 'dark');
+      setTheme(cur === 'dark' ? 'light' : (cur === 'light' ? 'glass' : 'dark'));
     }
     function applyStoredTheme() {
       applyThemeClass(getSavedTheme());
@@ -2039,7 +2168,12 @@
       if (!data || typeof data !== 'object' || typeof data.elements !== 'string') {
         throw new Error('Bad board data');
       }
-      restoreSnapshot({ html: data.elements, drawing: data.drawing || null });
+      if (data.app && data.app !== 'vibey') throw new Error('Not a Vibey board');
+      if (typeof data.version === 'number' && data.version > 1) throw new Error('Unsupported board version');
+      if (data.elements.length > 20 * 1024 * 1024) throw new Error('Board file too large');
+      if (typeof data.drawing === 'string' && data.drawing.length > 15 * 1024 * 1024) throw new Error('Drawing too large');
+      const clean = sanitizeBoardHTML(data.elements);
+      restoreSnapshot({ html: clean, drawing: data.drawing || null });
       if (typeof data.title === 'string' && data.title) {
         state.title = data.title;
         const t = document.getElementById('canvasTitle');
@@ -2078,30 +2212,39 @@
     }
     function scheduleAutosave() {
       if (autosaveTimer) clearTimeout(autosaveTimer);
-      setSaveStatus('saving');
       autosaveTimer = setTimeout(async () => {
         autosaveTimer = null;
+        setSaveStatus('saving');
         let payload;
         try { payload = JSON.stringify(serializeBoard()); }
         catch (e) { setSaveStatus('failed'); return; }
-        const onOk = () => setSaveStatus('saved');
+        const onOk = () => { setSaveStatus('saved'); autosaveWarned = false; };
         const onFail = () => {
           setSaveStatus('failed');
           if (!autosaveWarned) { autosaveWarned = true; showToast('Autosave failed — board too large for storage'); }
         };
-        try { await opfsWriteText(AUTOSAVE_FILE, payload); onOk(); return; }
+        let opfsOk = false;
+        try { await opfsWriteText(AUTOSAVE_FILE, payload); opfsOk = true; onOk(); }
         catch (e) { /* fall through to legacy backends */ }
-        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-          try {
-            chrome.storage.local.set({ [AUTOSAVE_KEY]: payload }, () => {
-              if (chrome.runtime && chrome.runtime.lastError) onFail();
-              else onOk();
-            });
-          } catch (e) { onFail(); }
-        } else {
-          try { localStorage.setItem(AUTOSAVE_KEY, payload); onOk(); }
-          catch (e) { onFail(); }
-        }
+        // keep legacy copy fresh so OPFS eviction never resurrects a stale board
+        try {
+          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            try {
+              chrome.storage.local.set({ [AUTOSAVE_KEY]: payload }, () => {
+                if (chrome.runtime && chrome.runtime.lastError) {
+                  try { localStorage.setItem(AUTOSAVE_KEY, payload); onOk(); }
+                  catch (e2) { if (!opfsOk) onFail(); }
+                } else if (!opfsOk) onOk();
+              });
+            } catch (e) {
+              try { localStorage.setItem(AUTOSAVE_KEY, payload); if (!opfsOk) onOk(); }
+              catch (e2) { if (!opfsOk) onFail(); }
+            }
+          } else {
+            try { localStorage.setItem(AUTOSAVE_KEY, payload); onOk(); }
+            catch (e) { if (!opfsOk) onFail(); }
+          }
+        } catch (eOuter) { if (!opfsOk) onFail(); }
       }, 1000);
     }
     function loadAutosave() {
@@ -2211,9 +2354,11 @@
     document.getElementById('shareClearBoard').onclick = () => { if (confirm('Clear board?')) { UI.elements.innerHTML = ''; selectElement(null); updateLayersPanel(); pushHistory(); } };
 
     // --- REFINED EXPORT ENGINE ---
+    function sanitizeFilename(name) { return String(name || 'Vibey').replace(/[\\/:*?"<>|]/g, '-').slice(0, 120) || 'Vibey'; }
     function downloadDataUrl(filename, dataUrl) {
       const link = document.createElement('a');
-      link.download = filename; link.href = dataUrl; link.click();
+      link.download = sanitizeFilename(filename); link.href = dataUrl;
+      document.body.appendChild(link); link.click(); link.remove();
     }
 
     function getExportBounds() {
@@ -2226,7 +2371,7 @@
         };
       }
 
-      const items = Array.from(UI.elements.querySelectorAll('.board-item')).filter(el => el.style.display !== 'none' && el.offsetWidth > 0);
+      const items = Array.from(UI.elements.children).filter(el => el.classList && el.classList.contains('board-item') && el.style.display !== 'none' && el.offsetWidth > 0);
       if (items.length === 0 && !drawingDataURL) return null;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       items.forEach((el) => {
@@ -2307,12 +2452,29 @@
       return Math.max(...gifElements.map(g => g.frames.reduce((s, f) => s + f.delay, 0)));
     }
 
-    // Strokes are recorded in board units on a 2x backing store:
-    // half size maps canvas pixels back to board units in any export ctx.
+    // Drawing layer is screen-space (innerWidth*2 backing). For match-view (viewport)
+    // the mapping is exact; for full-board draw only the viewport intersection.
     async function drawDrawingLayer(ctx, bounds) {
       if (!drawingDataURL) return;
-      const draw = await loadImage(drawingDataURL);
-      ctx.drawImage(draw, -bounds.x, -bounds.y, UI.canvas.width / 2, UI.canvas.height / 2);
+      try {
+        const draw = await loadImage(drawingDataURL);
+        const vw = window.innerWidth / state.zoom, vh = window.innerHeight / state.zoom;
+        const vx = -state.panX / state.zoom, vy = -state.panY / state.zoom;
+        if (state.exportMatchView) {
+          ctx.drawImage(draw, -bounds.x, -bounds.y, UI.canvas.width / 2, UI.canvas.height / 2);
+        } else {
+          const ix = Math.max(bounds.x, vx), iy = Math.max(bounds.y, vy);
+          const iw = Math.min(bounds.x + bounds.width, vx + vw) - ix;
+          const ih = Math.min(bounds.y + bounds.height, vy + vh) - iy;
+          if (iw > 0 && ih > 0) {
+            // source rect in screen px (2x backing): (ix-vx)*zoom*2
+            const sx = (ix - vx) * state.zoom * 2, sy = (iy - vy) * state.zoom * 2;
+            const sw = iw * state.zoom * 2, sh = ih * state.zoom * 2;
+            try { ctx.drawImage(draw, sx, sy, sw, sh, ix - bounds.x, iy - bounds.y, iw, ih); }
+            catch (e) { /* skip */ }
+          }
+        }
+      } catch (e) { /* skip broken drawing */ }
     }
 
     // Export text with its real size/color/alignment instead of a fixed style
@@ -2365,15 +2527,19 @@
     async function renderExportCanvas(format) {
       const bounds = getExportBounds();
       if (!bounds) throw new Error('Nothing to export.');
-      // Cap size: uncapped huge boards can kill toDataURL
+      // Cap size: uncapped huge boards can kill toDataURL (allow downscale below 0.5)
       const staticMaxDim = 1600;
-      const renderScale = Math.max(0.5, Math.min(2, staticMaxDim / Math.max(bounds.width, bounds.height)));
+      const longest = Math.max(1, bounds.width, bounds.height);
+      const renderScale = Math.min(2, staticMaxDim / longest);
       const canvas = document.createElement('canvas');
-      canvas.width = bounds.width * renderScale; canvas.height = bounds.height * renderScale;
+      canvas.width = Math.max(1, Math.round(bounds.width * renderScale));
+      canvas.height = Math.max(1, Math.round(bounds.height * renderScale));
       const ctx = canvas.getContext('2d');
       ctx.scale(renderScale, renderScale);
       
-      if (format === 'jpeg') { ctx.fillStyle = '#08080a'; ctx.fillRect(0, 0, bounds.width, bounds.height); }
+      const isLightExport = document.body.classList.contains('theme-light');
+      if (format === 'jpeg') { ctx.fillStyle = isLightExport ? '#ffffff' : '#08080a'; ctx.fillRect(0, 0, bounds.width, bounds.height); }
+      if (state.globalOpacity != null && state.globalOpacity < 1) ctx.globalAlpha = Math.max(0, Math.min(1, state.globalOpacity));
 
       const paintItems = collectPaintItems();
       const { map: cleanImgs, skipped } = await preloadCleanImages(paintItems.map(p => p.el));
@@ -2396,7 +2562,20 @@
             ctx.drawImage(si, left, top, width, height);
           } catch (e) { /* skip broken stroke */ }
         }
-        else if (video) ctx.drawImage(video, left, top, width, height);
+        else if (video) {
+          try {
+            if (video.readyState >= 2 && video.videoWidth > 0) ctx.drawImage(video, left, top, width, height);
+          } catch (e) { /* skip unreadable video frame */ }
+        }
+        else if (el.querySelector('iframe')) {
+          try {
+            ctx.fillStyle = 'rgba(139,137,255,0.15)';
+            ctx.fillRect(left, top, width, height);
+            ctx.fillStyle = '#c4c3ff';
+            ctx.font = '600 14px system-ui';
+            ctx.fillText('YouTube video (not in static export)', left + 12, top + 24);
+          } catch (e) {}
+        }
         else if (txt) drawExportText(ctx, txt, left, top, width);
       }
       
@@ -2405,7 +2584,8 @@
       const mimeMap = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
       let url;
       try {
-        url = canvas.toDataURL(mimeMap[format] || 'image/png', 1.0);
+        const q = (format === 'jpeg' || format === 'webp') ? 0.92 : undefined;
+        url = q === undefined ? canvas.toDataURL(mimeMap[format] || 'image/png') : canvas.toDataURL(mimeMap[format] || 'image/png', q);
       } catch (e) {
         throw new Error('Export blocked by page content (CORS). Try removing web videos.');
       }
@@ -2472,7 +2652,7 @@
 
           const frames  = [];
           const SAMPLE_MS = 40; // ~25fps sampling
-          const DURATION_MS = 10000; // sample for up to 10s to catch slow GIFs
+          const DURATION_MS = 3000; // capped at 3s to avoid long freezes
           const STABLE_MS = 2000; // stop early if nothing changed for 2s
           let lastHash  = null;
           let elapsed   = 0;
@@ -2669,8 +2849,10 @@
                 ctx.drawImage(frameAtTime(gifEntry, timeMs), itemLeft, itemTop, elW, elH);
               } else {
                 const img = el.querySelector('img');
-                if (img && cleanImgs.has(el)) ctx.drawImage(cleanImgs.get(el), itemLeft, itemTop, elW, elH);
-                else if (video) ctx.drawImage(video, itemLeft, itemTop, elW, elH);
+                if (img && cleanImgs.has(el)) { try { ctx.drawImage(cleanImgs.get(el), itemLeft, itemTop, elW, elH); } catch (e) {} }
+                else if (video) {
+                  try { if (video.readyState >= 2 && video.videoWidth > 0) ctx.drawImage(video, itemLeft, itemTop, elW, elH); } catch (e) {}
+                }
                 else if (txt) drawExportText(ctx, txt, itemLeft, itemTop, elW);
               }
             }
@@ -2735,7 +2917,9 @@
             ? 'video/webm;codecs=vp9'
             : 'video/webm;codecs=vp8';
           const stream = captureCanvas.captureStream(30);
-          const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 12000000 });
+          const px = captureCanvas.width * captureCanvas.height;
+          const bitrate = Math.max(800000, Math.min(12000000, Math.round(px * 4)));
+          const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitrate });
           const chunks = [];
           recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
           recorder.onstop = () => {
@@ -2746,21 +2930,23 @@
             }
             // Save as .webm (browsers record webm, not mp4)
             const blob = new Blob(chunks, { type: 'video/webm' });
-            downloadDataUrl(`${state.title || 'Vibey'}.webm`, URL.createObjectURL(blob));
+            const wurl = URL.createObjectURL(blob);
+            downloadDataUrl(`${state.title || 'Vibey'}.webm`, wurl);
+            setTimeout(() => { try { URL.revokeObjectURL(wurl); } catch (e) {} }, 10000);
             showToast('✅ WebM Video Exported!' + (skippedImgs ? ' (' + skippedImgs + ' blocked skipped)' : ''));
             btn.classList.remove('export-loading');
           };
 
-          const drawingImg = drawingDataURL ? await loadImage(drawingDataURL) : null;
+          const paintItems = collectPaintItems();
           const strokeImgs = new Map();
-          for (const el of UI.elements.children) {
+          for (const { el } of paintItems) {
+            if (strokeImgs.has(el)) continue;
             const svg = el.querySelector && el.querySelector('svg.vibey-stroke');
             if (!svg) continue;
             try {
               strokeImgs.set(el, await rasterizeStrokeSVG(svg, el.offsetWidth || 280, el.offsetHeight || 200));
             } catch (e) { /* skip broken stroke */ }
           }
-          const paintItems = collectPaintItems();
           const { map: cleanImgs, skipped: skippedImgs } = await preloadCleanImages(paintItems.map(p => p.el));
           if (exportCancelled) {
             showToast('Export cancelled');
@@ -2798,11 +2984,13 @@
                 continue;
               }
               const img = el.querySelector('img'); const video = el.querySelector('video'); const txt = el.querySelector('.board-text');
-              if (img && cleanImgs.has(el)) ctx.drawImage(cleanImgs.get(el), left, top, elW, elH);
-              else if (video) ctx.drawImage(video, left, top, elW, elH);
+              if (img && cleanImgs.has(el)) { try { ctx.drawImage(cleanImgs.get(el), left, top, elW, elH); } catch (e) {} }
+              else if (video) {
+                try { if (video.readyState >= 2 && video.videoWidth > 0) ctx.drawImage(video, left, top, elW, elH); } catch (e) {}
+              }
               else if (txt) drawExportText(ctx, txt, left, top, elW);
             }
-            if (drawingImg) ctx.drawImage(drawingImg, -bounds.x, -bounds.y, UI.canvas.width / 2, UI.canvas.height / 2);
+            try { drawDrawingLayer(ctx, bounds).catch(()=>{}); } catch (e) {}
             requestAnimationFrame(recordLoop);
           };
           recordLoop();
@@ -2851,17 +3039,26 @@
     if (shortcutsModal) shortcutsModal.onclick = (e) => { if (e.target === shortcutsModal) toggleShortcuts(false); };
 
     // Header Actions & Settings
-    document.getElementById('canvasTitle').onblur = (e) => { state.title = e.target.innerText; document.title = `Vibey - ${state.title}`; };
+    document.getElementById('canvasTitle').onblur = (e) => {
+      state.title = String(e.target.innerText || '').slice(0, 120) || 'Untitled';
+      e.target.innerText = state.title;
+      document.title = `Vibey - ${state.title}`;
+      try { scheduleAutosave(); } catch (err) {}
+    };
     document.getElementById('resetZoomBtn').onclick = () => { state.targetZoom = 1.0; state.targetPanX = 0; state.targetPanY = 0; queueTransformRender(); };
     document.getElementById('clearDrawBtn').onclick = () => { if(confirm('Clear all drawing?')) { UI.ctx.clearRect(0,0,UI.canvas.width,UI.canvas.height); saveDrawing(); pushHistory(); } };
     document.getElementById('deleteSelectedBtn').onclick = () => deleteSelected();
     
+    let opacitySaveTimer = null;
     document.getElementById('globalOpacityRange').oninput = (e) => {
-      const val = parseInt(e.target.value);
+      const val = Math.max(10, Math.min(100, parseInt(e.target.value) || 100));
       state.globalOpacity = val / 100;
-      document.getElementById('opacityVal').textContent = val + '%';
+      const ov = document.getElementById('opacityVal');
+      if (ov) ov.textContent = val + '%';
       UI.elements.style.opacity = state.globalOpacity;
       UI.canvas.style.opacity = state.globalOpacity;
+      if (opacitySaveTimer) clearTimeout(opacitySaveTimer);
+      opacitySaveTimer = setTimeout(() => { try { scheduleAutosave(); } catch (err) {} }, 800);
     };
 
     // Layers Panel Actions
@@ -2901,6 +3098,7 @@
       const f = e.target.files && e.target.files[0];
       e.target.value = '';
       if (!f) return;
+      if (f.size > 20 * 1024 * 1024) { showToast('Board file too large (max 20MB)'); return; }
       const r = new FileReader();
       r.onload = (re) => {
         try {
@@ -2916,36 +3114,90 @@
 
     // Toolbar logic
     document.getElementById('imageToolBtn').onclick = () => document.getElementById('fileInput').click();
+    const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
+    const objectUrls = [];
+    function trackObjectUrl(u) { objectUrls.push(u); if (objectUrls.length > 50) objectUrls.shift(); return u; }
     document.getElementById('fileInput').onchange = (e) => {
-      const files = Array.from(e.target.files);
+      const files = Array.from(e.target.files || []).slice(0, 10);
+      let added = 0;
       files.forEach((f, i) => {
-        const isVideo = f.type && f.type.startsWith('video/');
-        if (!isVideo && !(f.type && f.type.startsWith('image/'))) return;
-        const r = new FileReader();
-        r.onload = (re) => {
-          const p = getNextPlacement(isVideo ? 320 : 280, isVideo ? 180 : 200);
-          addElement(isVideo ? 'video' : 'image', re.target.result, p.x + i * 20, p.y + i * 20);
-        };
-        r.readAsDataURL(f);
+        if (!f || !f.type) return;
+        if (/tiff?$/i.test(f.type) || /\.tiff?$/i.test(f.name || '')) { showToast('TIFF not supported in browser — convert to PNG'); return; }
+        if (f.size > MAX_IMPORT_BYTES) { showToast('File too large (max 25MB): ' + (f.name || '')); return; }
+        const isVideo = f.type.startsWith('video/');
+        if (!isVideo && !f.type.startsWith('image/')) return;
+        if (isVideo) {
+          const u = trackObjectUrl(URL.createObjectURL(f));
+          const pl = getNextPlacement(320, 180);
+          addElementSilent('video', u, pl.x + added * 20, pl.y + added * 20);
+          added++;
+        } else {
+          const r = new FileReader();
+          r.onload = (re) => {
+            const res = String(re.target.result || '');
+            if (res.length > 30 * 1024 * 1024) { showToast('Image too large to add'); return; }
+            const pl = getNextPlacement(280, 200);
+            addElementSilent('image', res, pl.x + added * 20, pl.y + added * 20);
+            added++;
+            if (added === files.length) pushHistory();
+          };
+          r.onerror = () => showToast('Could not read file');
+          r.readAsDataURL(f);
+        }
       });
+      if (files.some(f => f.type && f.type.startsWith('video/'))) pushHistory();
       e.target.value = '';
     };
+    function addElementSilent(type, data, x, y) {
+      const prev = isRestoringHistory;
+      // add without per-item history; caller pushes once
+      isRestoringHistory = true;
+      try { addElement(type, data, x, y); } finally { isRestoringHistory = false; }
+      // addElement called pushHistory which was suppressed; selection still updated
+    }
     // ── Drag & drop + clipboard paste: images from web pages, files, clipboard ──
     function handleImageFile(file, x, y) {
       if (!file || !file.type) return false;
+      if (/tiff?$/i.test(file.type) || /\.tiff?$/i.test(file.name || '')) { showToast('TIFF not supported'); return false; }
+      if (file.size > MAX_IMPORT_BYTES) { showToast('File too large (max 25MB)'); return false; }
       const isVideo = file.type.startsWith('video/');
       if (!isVideo && !file.type.startsWith('image/')) return false;
+      if (isVideo) {
+        const u = trackObjectUrl(URL.createObjectURL(file));
+        let pos = (typeof x === 'number') ? { x, y } : getNextPlacement(320, 180);
+        isRestoringHistory = true;
+        try { addElement('video', u, pos.x, pos.y); } finally { isRestoringHistory = false; }
+        pushHistory();
+        return true;
+      }
       const r = new FileReader();
       r.onload = (re) => {
-        let pos = (typeof x === 'number') ? { x, y } : getNextPlacement(isVideo ? 320 : 280, isVideo ? 180 : 200);
-        addElement(isVideo ? 'video' : 'image', re.target.result, pos.x, pos.y);
+        const res = String(re.target.result || '');
+        if (res.length > 30 * 1024 * 1024) { showToast('Image too large to add'); return; }
+        let pos = (typeof x === 'number') ? { x, y } : getNextPlacement(280, 200);
+        addElement('image', res, pos.x, pos.y);
       };
+      r.onerror = () => showToast('Could not read file');
       r.readAsDataURL(file);
       return true;
     }
     function addImageUrlAt(url, clientX, clientY) {
       const clean = (url || '').split('\n').map((s) => s.trim()).find((s) => s && !s.startsWith('#'));
-      if (!clean || (!clean.startsWith('http') && !clean.startsWith('data:image'))) return false;
+      if (!clean) return false;
+      // YouTube links become embedded players
+      try {
+        const yt = getYouTubeId(clean);
+        if (yt) {
+          let x, y;
+          if (typeof clientX === 'number') { const pp = screenToBoard(clientX, clientY); x = pp.x - 240; y = pp.y - 135; }
+          else { const pp = getNextPlacement(480, 270); x = pp.x; y = pp.y; }
+          addElement('youtube', yt, x, y);
+          showToast('YouTube added');
+          return true;
+        }
+      } catch (e) {}
+      if (!clean.startsWith('http') && !clean.startsWith('data:image')) return false;
+      if (/\.tiff?(\?|$)/i.test(clean)) { showToast('TIFF not supported'); return false; }
       let x, y;
       if (typeof clientX === 'number') {
         const p = screenToBoard(clientX, clientY);
@@ -2962,27 +3214,44 @@
       e.dataTransfer.dropEffect = 'copy';
       UI.board.classList.add('dragging-over');
     });
+    let dragDepth = 0;
+    UI.board.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; UI.board.classList.add('dragging-over'); });
     UI.board.addEventListener('dragleave', (e) => {
-      if (e.target === UI.board) UI.board.classList.remove('dragging-over');
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0 || e.target === UI.board) UI.board.classList.remove('dragging-over');
     });
     UI.board.addEventListener('drop', (e) => {
       e.preventDefault();
+      dragDepth = 0;
       UI.board.classList.remove('dragging-over');
       const dt = e.dataTransfer;
       if (dt.files && dt.files.length) {
         let n = 0;
-        Array.from(dt.files).forEach((f, i) => {
-          const p = screenToBoard(e.clientX, e.clientY);
-          if (handleImageFile(f, p.x - 140 + i * 20, p.y - 100 + i * 20)) n++;
-        });
-        if (!n) showToast('Only image/video files can be dropped');
+        isRestoringHistory = true;
+        try {
+          Array.from(dt.files).slice(0, 10).forEach((f, i) => {
+            const p = screenToBoard(e.clientX, e.clientY);
+            // handleImageFile pushes for video; suppress to batch
+            const wasHist = isRestoringHistory;
+            if (handleImageFile(f, p.x - 140 + i * 20, p.y - 100 + i * 20)) n++;
+          });
+        } finally { isRestoringHistory = false; }
+        if (n) pushHistory();
+        else showToast('Only image/video files can be dropped');
         return;
       }
       const url = dt.getData('text/uri-list') || dt.getData('text/plain');
       if (addImageUrlAt(url, e.clientX, e.clientY)) return;
-      // Google Images & co. often provide only HTML: extract the first <img>
+      // Google Images & co. often provide only HTML: prefer srcset/data-src, largest candidate
       const html = dt.getData('text/html') || '';
-      const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+      let m = html.match(/<img[^>]+srcset=["']([^"']+)["']/i);
+      if (m) {
+        const cands = m[1].split(',').map(s => s.trim().split(/\s+/)[0]).filter(Boolean);
+        const best = cands[cands.length - 1] || cands[0];
+        if (best && addImageUrlAt(best, e.clientX, e.clientY)) return;
+      }
+      m = html.match(/<img[^>]+(?:data-src|data-original|data-full)=["']([^"']+)["']/i)
+        || html.match(/<img[^>]+src=["']([^"']+)["']/i);
       if (m && addImageUrlAt(m[1], e.clientX, e.clientY)) return;
       showToast('Drop an image file or image link');
     });
@@ -3048,9 +3317,9 @@
       else if (k === 'd') updateTool('draw');
       else if (k === 't') updateTool('text');
       else if (k === 'i') document.getElementById('fileInput')?.click();
-      else if (k === 'q') document.getElementById('queuePanel')?.classList.toggle('visible');
-      else if (k === 'l') document.getElementById('layersPanel')?.classList.toggle('visible');
-      else if (k === 's') document.getElementById('settingsPanel')?.classList.toggle('visible');
+      else if (k === 'q') { if (!document.body.classList.contains('preview-mode')) document.getElementById('queuePanel')?.classList.toggle('visible'); }
+      else if (k === 'l') { if (!document.body.classList.contains('preview-mode')) document.getElementById('layersPanel')?.classList.toggle('visible'); }
+      else if (k === 's') { if (!document.body.classList.contains('preview-mode')) document.getElementById('settingsPanel')?.classList.toggle('visible'); }
       else if (k === 'p') setDrawShape('pen');
       else if (k === 'r') setDrawShape('rect');
       else if (k === 'c') setDrawShape('circle');
@@ -3065,7 +3334,7 @@
       else if (k === '+' || k === '=') updateZoom(0.08, window.innerWidth / 2, window.innerHeight / 2);
       else if (k === '-' || k === '_') updateZoom(-0.08, window.innerWidth / 2, window.innerHeight / 2);
       else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); return; }
-      if (e.key === 'Escape') { if (isExporting) exportCancelled = true; toggleShortcuts(false); closeAllPanels(); if (marquee) cancelMarquee(true); else selectElement(null); if (document.body.classList.contains('preview-mode')) togglePreview(); }
+      if (e.key === 'Escape') { if (isExporting) exportCancelled = true; toggleShortcuts(false); closeAllPanels(); try { hidePenPopoverSafe(); } catch (err) {} if (marquee) cancelMarquee(true); else selectElement(null); if (document.body.classList.contains('preview-mode')) togglePreview(); }
     });
     document.addEventListener('keyup', e => {
       if (e.code === 'Space') { spaceDown = false; syncBoardCursor(); }
@@ -3127,9 +3396,21 @@
 
     function renderCommandList(filter) {
       const list = document.getElementById('commandList');
-      const filtered = commands.filter(c => c.name.toLowerCase().includes(filter.toLowerCase()));
-      list.innerHTML = filtered.map(c => `<div class="modal-item" onclick="commands.find(cmd=>cmd.id==='${c.id}').action(); toggleCommandPalette();"><span>${c.name}</span></div>`).join('');
+      if (!list) return;
+      const filtered = commands.filter(c => c.name.toLowerCase().includes((filter||'').toLowerCase()));
+      list.innerHTML = filtered.map(c => `<div class="modal-item" data-cmd="${c.id}"><span>${c.name}</span></div>`).join('');
+      if (!list._vibeyCmdBound) {
+        list._vibeyCmdBound = true;
+        list.addEventListener('click', (e) => {
+          const row = e.target.closest('[data-cmd]');
+          if (!row) return;
+          const cmd = commands.find(cmd => cmd.id === row.dataset.cmd);
+          if (cmd) { try { cmd.action(); } catch (err) {} }
+          toggleCommandPalette();
+        });
+      }
     }
+    try { window.vibeyCommands = commands; window.toggleCommandPalette = toggleCommandPalette; } catch (e) {}
 
     const commandInput = document.getElementById('commandInput');
     if (commandInput) {
@@ -3148,16 +3429,28 @@
       if (!el || (el.dataset.layerType !== 'text' && el.dataset.layerType !== 'sticky')) return null;
       return el.querySelector('.board-text, .sticky-text');
     }
-    document.getElementById('fontFamily').addEventListener('input', (e) => {
-      selectedTextBox()?.style.setProperty('font-family', e.target.value);
+    let fontHistTimer = null;
+    function scheduleFontHistory() {
+      if (fontHistTimer) clearTimeout(fontHistTimer);
+      fontHistTimer = setTimeout(() => { fontHistTimer = null; pushHistory(); }, 600);
+    }
+    document.getElementById('fontFamily')?.addEventListener('input', (e) => {
+      const t = selectedTextBox(); if (!t) return;
+      t.style.setProperty('font-family', e.target.value);
+      try { syncTextToolbar(t); positionTextToolbar(); } catch (err) {}
+      scheduleFontHistory();
     });
-    document.getElementById('fontSize').addEventListener('input', (e) => {
-      const t = selectedTextBox();
-      if (t) t.style.fontSize = e.target.value + 'px';
+    document.getElementById('fontSize')?.addEventListener('input', (e) => {
+      const t = selectedTextBox(); if (!t) return;
+      t.style.fontSize = e.target.value + 'px';
+      try { syncTextToolbar(t); positionTextToolbar(); } catch (err) {}
+      scheduleFontHistory();
     });
-    document.getElementById('textColor').addEventListener('input', (e) => {
-      const t = selectedTextBox();
-      if (t) t.style.color = e.target.value;
+    document.getElementById('textColor')?.addEventListener('input', (e) => {
+      const t = selectedTextBox(); if (!t) return;
+      t.style.color = e.target.value;
+      try { syncTextToolbar(t); } catch (err) {}
+      scheduleFontHistory();
     });
     
     document.getElementById('brushSize').addEventListener('input', (e) => {
@@ -3175,7 +3468,28 @@
         showToast('Grid snap ' + (state.gridSnap ? 'on' : 'off'));
     });
 
+    function safeBind(id, fn) {
+      try {
+        const el = document.getElementById(id);
+        if (!el) return;
+        fn(el);
+      } catch (e) {}
+    }
+    function clampPanelsToViewport() {
+      try {
+        ['menuPanel','queuePanel','layersPanel','settingsPanel'].forEach(pid => {
+          const panel = document.getElementById(pid);
+          if (!panel) return;
+          const maxLeft = Math.max(8, window.innerWidth - panel.offsetWidth - 8);
+          const maxTop = Math.max(8, window.innerHeight - panel.offsetHeight - 8);
+          panel.style.left = Math.min(Math.max(8, panel.offsetLeft), maxLeft) + 'px';
+          panel.style.top = Math.min(Math.max(8, panel.offsetTop), maxTop) + 'px';
+        });
+      } catch (e) {}
+    }
+    window.addEventListener('resize', clampPanelsToViewport);
     initPanelDragging('menuPanel'); initPanelDragging('queuePanel'); initPanelDragging('layersPanel'); initPanelDragging('settingsPanel');
+    clampPanelsToViewport();
     applyStoredTheme();
     document.getElementById('zoomInBtn').onclick = () => updateZoom(0.12, window.innerWidth / 2, window.innerHeight / 2);
     document.getElementById('zoomOutBtn').onclick = () => updateZoom(-0.12, window.innerWidth / 2, window.innerHeight / 2);
@@ -3225,5 +3539,6 @@
     applyTransform();
     document.body.classList.add('tool-select');
     selectElement(null);
-    pushHistory();
-    loadAutosave();
+    try { loadAutosave(); } catch (e) {}
+    // push initial history AFTER load attempt settles (avoid overwriting saved board with empty)
+    setTimeout(() => { if (historyStack.length === 0) pushHistory(); }, 1500);
