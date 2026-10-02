@@ -35,16 +35,6 @@
       text: 0,
       drawing: 0
     };
-    const placementOffsets = [
-      { x: -260, y: -130 },
-      { x: 240, y: -110 },
-      { x: -320, y: 120 },
-      { x: 40, y: 160 },
-      { x: 300, y: 180 },
-      { x: -80, y: -250 },
-      { x: 340, y: -260 }
-    ];
-
     const UI = {
       cursor:   document.getElementById('custom-cursor'),
       board:    document.getElementById('board'),
@@ -94,15 +84,10 @@
       updateLayersPanel();
     }
 
+    // Everything new lands at the center of the current view
     function getNextPlacement(width = 280, height = 200) {
-      const index = UI.elements.querySelectorAll('.board-item').length;
-      const offset = placementOffsets[index % placementOffsets.length];
-      const cycle = Math.floor(index / placementOffsets.length);
       const { x: cx, y: cy } = screenToBoard(window.innerWidth / 2, window.innerHeight / 2);
-      return {
-        x: cx + offset.x + cycle * 28 - width / 2,
-        y: cy + offset.y + cycle * 24 - height / 2
-      };
+      return { x: cx - width / 2, y: cy - height / 2 };
     }
 
     function initPanelDragging(panelId) {
@@ -325,7 +310,14 @@
 
     function rgbToHex(rgb) {
       if (!rgb) return null;
-      const m = rgb.match(/\d+/g);
+      const s = String(rgb).trim();
+      const hex = s.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+      if (hex) {
+        let h = hex[1];
+        if (h.length === 3) h = h.split('').map(c => c + c).join('');
+        return '#' + h.toLowerCase();
+      }
+      const m = s.match(/\d+/g);
       if (!m || m.length < 3) return null;
       return "#" + m.slice(0, 3).map(x => parseInt(x).toString(16).padStart(2, '0')).join('');
     }
@@ -399,6 +391,7 @@
 
     function makeDraggable(el) {
       let isDragging = false;
+      let moved = false;
       let start = { x: 0, y: 0 };
       el.addEventListener('mousedown', (e) => {
         if (state.tool !== 'select' || e.target.classList.contains('resizer')) return;
@@ -430,17 +423,18 @@
         if (!isDragging) return;
         let dx = (e.clientX - start.x) / state.zoom;
         let dy = (e.clientY - start.y) / state.zoom;
+        if (dx || dy) moved = true;
+        // Snap only while the grid is actually visible (dots fade out when zoomed far out)
+        if (state.gridSnap && state.zoom * state.gridSize >= 7 && el._dragStartPos) {
+          // Snap the shared delta once so multi-select keeps its offsets
+          dx = Math.round((el._dragStartPos.x + dx) / state.gridSize) * state.gridSize - el._dragStartPos.x;
+          dy = Math.round((el._dragStartPos.y + dy) / state.gridSize) * state.gridSize - el._dragStartPos.y;
+        }
         state.selectedIds.forEach(id => {
           const item = document.getElementById(id);
           if (item && item._dragStartPos) {
-            let nextX = item._dragStartPos.x + dx;
-            let nextY = item._dragStartPos.y + dy;
-            if (state.gridSnap) {
-              nextX = Math.round(nextX / state.gridSize) * state.gridSize;
-              nextY = Math.round(nextY / state.gridSize) * state.gridSize;
-            }
-            item.style.left = nextX + 'px';
-            item.style.top  = nextY + 'px';
+            item.style.left = item._dragStartPos.x + dx + 'px';
+            item.style.top  = item._dragStartPos.y + dy + 'px';
           }
         });
         updateSelectionFrame();
@@ -453,6 +447,7 @@
             const item = document.getElementById(id);
             if (item) delete item._dragStartPos;
           });
+          if (moved) { moved = false; pushHistory(); }
         }
       });
     }
@@ -578,10 +573,10 @@
       const r = n.getBoundingClientRect();
       const addBtn = document.getElementById('nodeAddBtn');
       const doneBtn = document.getElementById('nodeDoneBtn');
-      addBtn.style.left = (r.right + 8) + 'px';
-      addBtn.style.top = (r.top + r.height / 2 - 15) + 'px';
-      doneBtn.style.left = (r.left + r.width / 2 - 15) + 'px';
-      doneBtn.style.top = (r.bottom + 8) + 'px';
+      addBtn.style.left = Math.max(4, Math.min(r.right + 8, window.innerWidth - 38)) + 'px';
+      addBtn.style.top = Math.max(4, Math.min(r.top + r.height / 2 - 15, window.innerHeight - 38)) + 'px';
+      doneBtn.style.left = Math.max(4, Math.min(r.left + r.width / 2 - 15, window.innerWidth - 38)) + 'px';
+      doneBtn.style.top = Math.max(4, Math.min(r.bottom + 8, window.innerHeight - 38)) + 'px';
     }
     let frameResize = null;
     function startFrameResize(dir, e) {
@@ -603,6 +598,7 @@
       if (!frameResize) return;
       const dx = (e.clientX - frameResize.startX) / state.zoom;
       const dy = (e.clientY - frameResize.startY) / state.zoom;
+      if (dx || dy) frameResize.moved = true;
       const dir = frameResize.dir;
       const MIN = 40;
       let left = frameResize.left, top = frameResize.top;
@@ -626,14 +622,45 @@
       positionTextToolbar();
     });
     window.addEventListener('mouseup', () => {
-      if (frameResize) { frameResize = null; pushHistory(); }
+      if (frameResize) {
+        const el = frameResize.el;
+        const moved = frameResize.moved;
+        frameResize = null;
+        // Keep group box in sync with children (expand-only: never undo the resize)
+        const group = el.classList && el.classList.contains('group-layer') ? el
+          : (el.closest ? el.closest('.group-layer') : null);
+        if (group) {
+          const content = group.querySelector('.group-content');
+          if (content) {
+            let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
+            Array.from(content.children).forEach(ch => {
+              const x = parseFloat(ch.style.left) || 0, y = parseFloat(ch.style.top) || 0;
+              minX = Math.min(minX, x); minY = Math.min(minY, y);
+              maxX = Math.max(maxX, x + (ch.offsetWidth || 0));
+              maxY = Math.max(maxY, y + (ch.offsetHeight || 0));
+            });
+            if (minX < 0 || minY < 0) expandGroupToFit(group);
+            else {
+              const gw = parseFloat(group.style.width) || 0, gh = parseFloat(group.style.height) || 0;
+              if (maxX > gw) group.style.width = maxX + 'px';
+              if (maxY > gh) group.style.height = maxY + 'px';
+              updateSelectionFrame();
+            }
+          }
+        }
+        if (moved) pushHistory();
+      }
     });
 
     // ── Floating text toolbar (Miro-style) ──
     function selectedTextEl() {
       const el = state.selectedId ? document.getElementById(state.selectedId) : null;
-      if (!el || (el.dataset.layerType !== 'text' && el.dataset.layerType !== 'sticky')) return null;
-      return el.querySelector('.board-text, .sticky-text');
+      if (!el) return null;
+      if (el.dataset.layerType === 'text' || el.dataset.layerType === 'sticky') return el.querySelector('.board-text, .sticky-text');
+      // Editing text nested inside a selected group/diagram: style that text
+      const active = document.activeElement;
+      if (active && active.classList && active.classList.contains('board-text') && el.contains(active)) return active;
+      return null;
     }
     function syncTextToolbar(txt) {
       const size = parseInt(txt.style.fontSize) || 24;
@@ -757,8 +784,10 @@
         const video = document.createElement('video');
         video.src = data;
         video.controls = false;
-        video.loop = true;
-        video.autoplay = true;
+        video.setAttribute('loop', '');
+        video.setAttribute('autoplay', '');
+        video.setAttribute('muted', '');
+        video.setAttribute('playsinline', '');
         video.muted = true;
         video.style.width = '100%';
         video.style.height = '100%';
@@ -1040,8 +1069,8 @@
       const color = brushColor();
       const lw = brushBaseSize() / state.zoom;
       const needHead = kind === 'arrow' || kind === 'elbow';
-      const headLen = Math.max(10, lw * 3.5);
-      const pad = lw / 2 + 4 + (needHead ? headLen : 0);
+      const headLen = Math.max(10 / state.zoom, lw * 3.5);
+      const pad = lw / 2 + 4 / state.zoom + (needHead ? headLen : 0);
       const thin = kind === 'line' || kind === 'arrow' || kind === 'divider' || kind === 'elbow';
       const minX = Math.min(sx, ex) - pad, minY = Math.min(sy, ey) - pad;
       const w = Math.max(thin ? 8 : 16, Math.abs(ex - sx) + pad * 2);
@@ -1396,12 +1425,15 @@
       if (bx < box.x || bx > box.x + box.w || by < box.y || by > box.y + box.h) return false; // cheap reject
       const svg = el.querySelector('svg.vibey-stroke');
       const shape = svg && svg.firstElementChild;
-      if (!shape || typeof shape.isPointInStroke !== 'function') return true; // inside bbox
+      if (!shape || (typeof shape.isPointInStroke !== 'function' && typeof shape.isPointInFill !== 'function')) return true; // inside bbox
       try {
         const vb = svg.viewBox.baseVal;
         const lx = (bx - box.x) * (vb.width / (box.w || 1));
         const ly = (by - box.y) * (vb.height / (box.h || 1));
-        return shape.isPointInStroke(new DOMPoint(lx, ly));
+        const pt = new DOMPoint(lx, ly);
+        if (typeof shape.isPointInStroke === 'function' && shape.isPointInStroke(pt)) return true;
+        if (typeof shape.isPointInFill === 'function' && shape.isPointInFill(pt)) return true;
+        return false;
       } catch (e) { return true; }
     }
     function eraseAt(bx, by) {
@@ -1465,7 +1497,6 @@
         if (!e.target.closest('.board-item')) {
           if (e.button !== 0) return;
           if (spaceDown) {
-            selectElement(null);
             state.isPanning = true;
             panSession = { startX: e.clientX, startY: e.clientY, panX: state.targetPanX, panY: state.targetPanY };
             UI.board.classList.add('panning');
@@ -1550,7 +1581,7 @@
       if (pendingNodeSelect) {
         const p = pendingNodeSelect;
         pendingNodeSelect = null;
-        if (e && Math.hypot(e.clientX - p.x, e.clientY - p.y) < 6 && document.getElementById(p.id)) selectElement(p.id);
+        if (e && Math.hypot(e.clientX - p.x, e.clientY - p.y) < 6 && document.getElementById(p.id)) selectElement(p.id, !!(e && (e.ctrlKey || e.metaKey)));
       }
       if (marquee) cancelMarquee(false);
       if (state.isDrawing) {
@@ -1558,6 +1589,11 @@
            const { x, y } = screenToBoard(state.mouseX, state.mouseY);
            const start = state.drawStart;
            UI.pctx.clearRect(0, 0, UI.preview.width, UI.preview.height);
+           // Click without drag: no shape, no history entry
+           if (Math.hypot(x - start.x, y - start.y) * state.zoom < 6) {
+             state.isDrawing = false;
+             return;
+           }
            if (state.drawShape === 'circle') {
              const r = Math.sqrt(Math.pow(x - start.x, 2) + Math.pow(y - start.y, 2));
              commitShapeAsObject('oval', start.x - r, start.y - r, start.x + r, start.y + r);
@@ -1643,8 +1679,16 @@
       </div>`;
       
       items.forEach(el => {
+        const hidden = el.style.display === 'none';
+        const eye = hidden
+          ? '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.6 6.6C3.8 8.3 2 12 2 12s3.5 7 10 7c1.5 0 2.9-.4 4.1-.9"/></svg>'
+          : '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
         html += `<div class="layer-item ${state.selectedIds.includes(el.id) ? 'active' : ''}" onclick="selectElement('${el.id}')">
           <span class="layer-name">${el.dataset.layerName || 'Layer'}</span>
+          <span class="layer-reorder">
+            <button class="icon-btn" title="${hidden ? 'Show layer' : 'Hide layer'}" onclick="event.stopPropagation(); toggleLayerVisibility('${el.id}')">${eye}</button>
+            <button class="icon-btn" title="Delete layer" onclick="event.stopPropagation(); deleteLayer('${el.id}')">×</button>
+          </span>
         </div>`;
       });
       list.innerHTML = html;
@@ -1657,6 +1701,26 @@
       if (direction === 'front') UI.elements.appendChild(target);
       else if (direction === 'back') UI.elements.prepend(target);
       syncElementStack(); updateLayersPanel(); pushHistory();
+    }
+
+    function deleteLayer(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.remove();
+      selectElement(null);
+      pushHistory();
+      showToast('Layer deleted');
+    }
+
+    function toggleLayerVisibility(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const hidden = el.style.display === 'none';
+      el.style.display = hidden ? '' : 'none';
+      if (!hidden) selectElement(null);
+      else updateLayersPanel();
+      pushHistory();
+      showToast(hidden ? 'Layer shown' : 'Layer hidden');
     }
 
     function bindLayersPanelEvents() {
@@ -1807,6 +1871,7 @@
         UI.elements.querySelectorAll('.board-item').forEach(el => {
           makeDraggable(el);
           makeResizable(el);
+          el.querySelectorAll('.board-text').forEach(t => { if (t.closest('.group-layer')) bindDiagramTextEdit(t); });
         });
         syncElementStack();
         selectElement(null);
@@ -1818,12 +1883,14 @@
       if (historyIndex <= 0) { showToast('Nothing to undo'); return; }
       historyIndex--;
       restoreSnapshot(historyStack[historyIndex]);
+      scheduleAutosave();
       showToast('Undone');
     }
     function redo() {
       if (historyIndex >= historyStack.length - 1) { showToast('Nothing to redo'); return; }
       historyIndex++;
       restoreSnapshot(historyStack[historyIndex]);
+      scheduleAutosave();
       showToast('Redone');
     }
     function deleteSelected() {
@@ -1853,7 +1920,10 @@
         makeDraggable(c);
         makeResizable(c);
         // Clones lose listeners: rebind every nested item too
-        c.querySelectorAll('.board-item').forEach((kid) => { makeDraggable(kid); makeResizable(kid); });
+        c.querySelectorAll('.board-item').forEach((kid) => {
+          makeDraggable(kid); makeResizable(kid);
+          kid.querySelectorAll('.board-text').forEach(t => { if (t.closest('.group-layer')) bindDiagramTextEdit(t); });
+        });
         newIds.push(nid);
       });
       if (newIds.length) {
@@ -1958,6 +2028,9 @@
         title: state.title,
         theme: document.body.classList.contains('theme-light') ? 'light'
           : (document.body.classList.contains('theme-glass') ? 'glass' : 'dark'),
+        zoom: state.targetZoom,
+        panX: state.targetPanX,
+        panY: state.targetPanY,
         elements: UI.elements.innerHTML,
         drawing: drawingDataURL
       };
@@ -1974,6 +2047,12 @@
         document.title = 'Vibey - ' + data.title;
       }
       if (data.theme) applyThemeClass(data.theme);
+      if (typeof data.zoom === 'number' && isFinite(data.zoom)) {
+        state.zoom = state.targetZoom = Math.max(0.05, Math.min(10, data.zoom));
+        state.panX = state.targetPanX = Number(data.panX) || 0;
+        state.panY = state.targetPanY = Number(data.panY) || 0;
+        queueTransformRender();
+      }
       pushHistory();
     }
     // ── Board file storage: OPFS device files → chrome.storage → localStorage ──
@@ -2094,6 +2173,9 @@
     document.getElementById('nodeDoneBtn').addEventListener('click', (e) => {
       e.stopPropagation();
       if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      const wrap = document.getElementById('nodeButtons');
+      if (wrap) delete wrap.dataset.node;
+      selectElement(null);
     });
 
     // Shapes menu (toolbar button)
@@ -2144,7 +2226,7 @@
         };
       }
 
-      const items = Array.from(UI.elements.querySelectorAll('.board-item'));
+      const items = Array.from(UI.elements.querySelectorAll('.board-item')).filter(el => el.style.display !== 'none' && el.offsetWidth > 0);
       if (items.length === 0 && !drawingDataURL) return null;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       items.forEach((el) => {
@@ -2163,6 +2245,33 @@
         const img = new Image(); img.crossOrigin = 'anonymous';
         img.onload = () => resolve(img); img.onerror = reject; img.src = src;
       });
+    }
+
+    // CORS-clean reload: sites that refuse embedding are skipped instead of
+    // tainting (and killing) the whole export.
+    function loadCleanImage(src, timeoutMs) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs || 8000);
+        img.onload = () => { clearTimeout(timer); resolve(img); };
+        img.onerror = () => { clearTimeout(timer); reject(new Error('blocked')); };
+        img.crossOrigin = 'anonymous';
+        img.src = src;
+      });
+    }
+
+    async function preloadCleanImages(assets) {
+      const map = new Map();
+      let skipped = 0;
+      await Promise.all(assets.map(async (el) => {
+        if (el.style.display === 'none') return;
+        const img = el.querySelector('img');
+        if (!img) return;
+        try {
+          map.set(el, await loadCleanImage(img.currentSrc || img.src));
+        } catch (e) { skipped++; }
+      }));
+      return { map, skipped };
     }
 
     let isExporting = false;
@@ -2206,20 +2315,71 @@
       ctx.drawImage(draw, -bounds.x, -bounds.y, UI.canvas.width / 2, UI.canvas.height / 2);
     }
 
+    // Export text with its real size/color/alignment instead of a fixed style
+    function textExportStyle(txt) {
+      const cs = (typeof getComputedStyle === 'function') ? getComputedStyle(txt) : null;
+      const pick = (inline, computed) => (inline && inline.trim()) || computed || '';
+      const size = parseFloat(pick(txt.style.fontSize, cs && cs.fontSize)) || 24;
+      const color = pick(txt.style.color, cs && cs.color) || '#ffffff';
+      const weight = pick(txt.style.fontWeight, cs && cs.fontWeight) || '600';
+      const tstyle = pick(txt.style.fontStyle, cs && cs.fontStyle);
+      const family = (pick(txt.style.fontFamily, cs && cs.fontFamily) || 'Segoe UI').split(',')[0].replace(/["']/g, '').trim() || 'Segoe UI';
+      const align = pick(txt.style.textAlign, cs && cs.textAlign);
+      return {
+        size, color,
+        font: (tstyle && tstyle !== 'normal' ? tstyle + ' ' : '') + weight + ' ' + size + 'px "' + family + '"',
+        align: (align === 'center' || align === 'right') ? align : 'left'
+      };
+    }
+    function drawExportText(ctx, txt, x, y, w) {
+      const st = textExportStyle(txt);
+      ctx.fillStyle = st.color;
+      ctx.font = st.font;
+      ctx.textBaseline = 'top';
+      ctx.textAlign = st.align;
+      const ax = st.align === 'center' ? x + w / 2 : (st.align === 'right' ? x + w - 8 : x + 8);
+      const lh = st.size * 1.25;
+      (txt.innerText || '').split('\n').forEach((line, idx) => ctx.fillText(line, ax, y + 8 + idx * lh));
+      ctx.textAlign = 'left';
+    }
+
+    // Flatten groups for export: nested items paint at group offset.
+    // (Painting the group div itself would stretch one child over the box.)
+    function collectPaintItems() {
+      const out = [];
+      Array.from(UI.elements.children).forEach(el => {
+        if (el.style.display === 'none') return;
+        if (el.classList.contains('group-layer')) {
+          const gx = parseFloat(el.style.left) || 0, gy = parseFloat(el.style.top) || 0;
+          el.querySelectorAll('.board-item').forEach(ch => {
+            if (ch.style.display === 'none') return;
+            out.push({ el: ch, dx: gx, dy: gy });
+          });
+        } else {
+          out.push({ el, dx: 0, dy: 0 });
+        }
+      });
+      return out;
+    }
+
     async function renderExportCanvas(format) {
       const bounds = getExportBounds();
       if (!bounds) throw new Error('Nothing to export.');
-      const renderScale = 2; // High-DPI export
+      // Cap size: uncapped huge boards can kill toDataURL
+      const staticMaxDim = 1600;
+      const renderScale = Math.max(0.5, Math.min(2, staticMaxDim / Math.max(bounds.width, bounds.height)));
       const canvas = document.createElement('canvas');
       canvas.width = bounds.width * renderScale; canvas.height = bounds.height * renderScale;
       const ctx = canvas.getContext('2d');
       ctx.scale(renderScale, renderScale);
       
       if (format === 'jpeg') { ctx.fillStyle = '#08080a'; ctx.fillRect(0, 0, bounds.width, bounds.height); }
-      
-      for (const el of UI.elements.children) {
-        const left = (parseFloat(el.style.left) || 0) - bounds.x;
-        const top = (parseFloat(el.style.top) || 0) - bounds.y;
+
+      const paintItems = collectPaintItems();
+      const { map: cleanImgs, skipped } = await preloadCleanImages(paintItems.map(p => p.el));
+      for (const { el, dx, dy } of paintItems) {
+        const left = (parseFloat(el.style.left) || 0) + dx - bounds.x;
+        const top = (parseFloat(el.style.top) || 0) + dy - bounds.y;
         const width = el.offsetWidth || 280;
         const height = el.offsetHeight || 200;
         const img = el.querySelector('img');
@@ -2228,7 +2388,7 @@
         const sticky = el.querySelector('.sticky-text');
         const strokeSvg = el.querySelector('svg.vibey-stroke');
 
-        if (img) ctx.drawImage(img, left, top, width, height);
+        if (img && cleanImgs.has(el)) ctx.drawImage(cleanImgs.get(el), left, top, width, height);
         else if (sticky) drawStickyExport(ctx, el, left, top, width, height);
         else if (strokeSvg) {
           try {
@@ -2237,17 +2397,20 @@
           } catch (e) { /* skip broken stroke */ }
         }
         else if (video) ctx.drawImage(video, left, top, width, height);
-        else if (txt) {
-          ctx.fillStyle = '#fff'; ctx.font = '600 24px Segoe UI'; ctx.textBaseline = 'top';
-          const lines = (txt.innerText || '').split('\n');
-          lines.forEach((line, idx) => ctx.fillText(line, left + 8, top + 8 + idx * 30));
-        }
+        else if (txt) drawExportText(ctx, txt, left, top, width);
       }
       
       await drawDrawingLayer(ctx, bounds);
 
       const mimeMap = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
-      return canvas.toDataURL(mimeMap[format] || 'image/png', 1.0);
+      let url;
+      try {
+        url = canvas.toDataURL(mimeMap[format] || 'image/png', 1.0);
+      } catch (e) {
+        throw new Error('Export blocked by page content (CORS). Try removing web videos.');
+      }
+      if (skipped) showToast('Exported (' + skipped + ' blocked image(s) skipped)');
+      return url;
     }
 
     // ── GIF Frame Extractor ───────────────────────────────────────────
@@ -2361,6 +2524,7 @@
     async function exportBoard(format) {
       const btn = document.getElementById('exportBtn');
       if (!btn) return;
+      if (isExporting) { showToast('Export already running'); return; }
 
       const assets = Array.from(UI.elements.querySelectorAll('.board-item'));
       const allDurations = assets.map(el => {
@@ -2433,12 +2597,19 @@
 
           // Pre-raster pen strokes (SVG → image, once for all frames)
           const strokeImgs = new Map();
-          for (const el of UI.elements.children) {
+          const paintItems = collectPaintItems();
+          for (const { el } of paintItems) {
             const svg = el.querySelector && el.querySelector('svg.vibey-stroke');
             if (!svg) continue;
             try {
               strokeImgs.set(el, await rasterizeStrokeSVG(svg, el.offsetWidth || 280, el.offsetHeight || 200));
             } catch (e) { /* skip broken stroke */ }
+          }
+          const { map: cleanImgs, skipped: skippedImgs } = await preloadCleanImages(paintItems.map(p => p.el));
+          if (exportCancelled) {
+            showToast('Export cancelled');
+            btn.classList.remove('export-loading');
+            return;
           }
 
           // ── Step 4: render each output frame ──
@@ -2476,10 +2647,9 @@
             ctx.save();
             ctx.scale(scale, scale);
 
-            for (const el of UI.elements.children) {
-              if (el.classList.contains('drawing-layer')) continue;
-              const itemLeft = (parseFloat(el.style.left) || 0) - bounds.x;
-              const itemTop  = (parseFloat(el.style.top)  || 0) - bounds.y;
+            for (const { el, dx, dy } of paintItems) {
+              const itemLeft = (parseFloat(el.style.left) || 0) + dx - bounds.x;
+              const itemTop  = (parseFloat(el.style.top) || 0) + dy - bounds.y;
               const elW = el.offsetWidth  || 280;
               const elH = el.offsetHeight || 200;
 
@@ -2499,15 +2669,9 @@
                 ctx.drawImage(frameAtTime(gifEntry, timeMs), itemLeft, itemTop, elW, elH);
               } else {
                 const img = el.querySelector('img');
-                if (img)   ctx.drawImage(img,   itemLeft, itemTop, elW, elH);
+                if (img && cleanImgs.has(el)) ctx.drawImage(cleanImgs.get(el), itemLeft, itemTop, elW, elH);
                 else if (video) ctx.drawImage(video, itemLeft, itemTop, elW, elH);
-                else if (txt) {
-                  ctx.fillStyle = '#fff';
-                  ctx.font = '600 24px Segoe UI';
-                  ctx.textBaseline = 'top';
-                  const lines = (txt.innerText || '').split('\n');
-                  lines.forEach((line, idx) => ctx.fillText(line, itemLeft + 8, itemTop + 8 + idx * 30));
-                }
+                else if (txt) drawExportText(ctx, txt, itemLeft, itemTop, elW);
               }
             }
 
@@ -2539,7 +2703,7 @@
             downloadDataUrl(gifFilename, gifUrl);
             setTimeout(() => URL.revokeObjectURL(gifUrl), 5000);
           }
-          showToast('✅ GIF Exported!');
+          showToast('✅ GIF Exported!' + (skippedImgs ? ' (' + skippedImgs + ' blocked skipped)' : ''));
           btn.classList.remove('export-loading');
           return;
         }
@@ -2547,6 +2711,11 @@
         if (format === 'mp4') {
           showToast('Analysing GIFs on board…');
           const gifElements = await collectGifElements(assets);
+          if (!gifElements) {
+            showToast('Export cancelled');
+            btn.classList.remove('export-loading');
+            return;
+          }
           const hasAnimated = gifElements.length > 0;
           const hasVideos = assets.some(el => el.querySelector('video'));
           // Static board: short clip instead of 10s of identical frames
@@ -2578,11 +2747,26 @@
             // Save as .webm (browsers record webm, not mp4)
             const blob = new Blob(chunks, { type: 'video/webm' });
             downloadDataUrl(`${state.title || 'Vibey'}.webm`, URL.createObjectURL(blob));
-            showToast('✅ WebM Video Exported!');
+            showToast('✅ WebM Video Exported!' + (skippedImgs ? ' (' + skippedImgs + ' blocked skipped)' : ''));
             btn.classList.remove('export-loading');
           };
 
           const drawingImg = drawingDataURL ? await loadImage(drawingDataURL) : null;
+          const strokeImgs = new Map();
+          for (const el of UI.elements.children) {
+            const svg = el.querySelector && el.querySelector('svg.vibey-stroke');
+            if (!svg) continue;
+            try {
+              strokeImgs.set(el, await rasterizeStrokeSVG(svg, el.offsetWidth || 280, el.offsetHeight || 200));
+            } catch (e) { /* skip broken stroke */ }
+          }
+          const paintItems = collectPaintItems();
+          const { map: cleanImgs, skipped: skippedImgs } = await preloadCleanImages(paintItems.map(p => p.el));
+          if (exportCancelled) {
+            showToast('Export cancelled');
+            btn.classList.remove('export-loading');
+            return;
+          }
           recorder.start();
           const startTime = Date.now();
 
@@ -2593,24 +2777,30 @@
             // FIX: reset transform each frame instead of accumulating scale(2,2)
             ctx.setTransform(vs, 0, 0, vs, 0, 0);
             ctx.fillStyle = '#08080a'; ctx.fillRect(0, 0, bounds.width, bounds.height);
-            for (const el of UI.elements.children) {
-              const left = (parseFloat(el.style.left) || 0) - bounds.x;
-              const top = (parseFloat(el.style.top) || 0) - bounds.y;
+            for (const { el, dx, dy } of paintItems) {
+              const left = (parseFloat(el.style.left) || 0) + dx - bounds.x;
+              const top = (parseFloat(el.style.top) || 0) + dy - bounds.y;
               const elW = el.offsetWidth || 280;
               const elH = el.offsetHeight || 200;
+              const strokeImg = strokeImgs.get(el);
+              const stickyTxt = el.querySelector('.sticky-text');
               const gifEntry = gifElements.find(g => g.el === el);
+              if (strokeImg) {
+                ctx.drawImage(strokeImg, left, top, elW, elH);
+                continue;
+              }
+              if (stickyTxt) {
+                drawStickyExport(ctx, el, left, top, elW, elH);
+                continue;
+              }
               if (gifEntry) {
                 ctx.drawImage(frameAtTime(gifEntry, timeMs), left, top, elW, elH);
                 continue;
               }
               const img = el.querySelector('img'); const video = el.querySelector('video'); const txt = el.querySelector('.board-text');
-              if (img) ctx.drawImage(img, left, top, elW, elH);
+              if (img && cleanImgs.has(el)) ctx.drawImage(cleanImgs.get(el), left, top, elW, elH);
               else if (video) ctx.drawImage(video, left, top, elW, elH);
-              else if (txt) {
-                ctx.fillStyle = '#fff'; ctx.font = '600 24px Segoe UI'; ctx.textBaseline = 'top';
-                const lines = txt.innerText.split('\n');
-                lines.forEach((line, idx) => ctx.fillText(line, left + 8, top + 8 + idx * 30));
-              }
+              else if (txt) drawExportText(ctx, txt, left, top, elW);
             }
             if (drawingImg) ctx.drawImage(drawingImg, -bounds.x, -bounds.y, UI.canvas.width / 2, UI.canvas.height / 2);
             requestAnimationFrame(recordLoop);
@@ -2676,7 +2866,7 @@
 
     // Layers Panel Actions
     document.getElementById('newLayerBtn').onclick = () => document.getElementById('fileInput').click();
-    document.getElementById('newTextLayerBtn').onclick = () => addElement('text', '', 0, 0);
+    document.getElementById('newTextLayerBtn').onclick = () => { const p = getNextPlacement(); addElement('text', '', p.x, p.y); };
     document.getElementById('drawingLayerBtn').onclick = () => updateTool('draw');
     document.getElementById('clearLayerSelectionBtn').onclick = () => selectElement(null);
     
@@ -2729,19 +2919,26 @@
     document.getElementById('fileInput').onchange = (e) => {
       const files = Array.from(e.target.files);
       files.forEach((f, i) => {
+        const isVideo = f.type && f.type.startsWith('video/');
+        if (!isVideo && !(f.type && f.type.startsWith('image/'))) return;
         const r = new FileReader();
-        r.onload = (re) => { const p = getNextPlacement(); addElement('image', re.target.result, p.x + i*20, p.y + i*20); };
+        r.onload = (re) => {
+          const p = getNextPlacement(isVideo ? 320 : 280, isVideo ? 180 : 200);
+          addElement(isVideo ? 'video' : 'image', re.target.result, p.x + i * 20, p.y + i * 20);
+        };
         r.readAsDataURL(f);
       });
       e.target.value = '';
     };
     // ── Drag & drop + clipboard paste: images from web pages, files, clipboard ──
     function handleImageFile(file, x, y) {
-      if (!file || !file.type || !file.type.startsWith('image/')) return false;
+      if (!file || !file.type) return false;
+      const isVideo = file.type.startsWith('video/');
+      if (!isVideo && !file.type.startsWith('image/')) return false;
       const r = new FileReader();
       r.onload = (re) => {
-        let pos = (typeof x === 'number') ? { x, y } : getNextPlacement();
-        addElement('image', re.target.result, pos.x, pos.y);
+        let pos = (typeof x === 'number') ? { x, y } : getNextPlacement(isVideo ? 320 : 280, isVideo ? 180 : 200);
+        addElement(isVideo ? 'video' : 'image', re.target.result, pos.x, pos.y);
       };
       r.readAsDataURL(file);
       return true;
@@ -2778,17 +2975,22 @@
           const p = screenToBoard(e.clientX, e.clientY);
           if (handleImageFile(f, p.x - 140 + i * 20, p.y - 100 + i * 20)) n++;
         });
-        if (!n) showToast('Only image files can be dropped');
+        if (!n) showToast('Only image/video files can be dropped');
         return;
       }
       const url = dt.getData('text/uri-list') || dt.getData('text/plain');
-      if (!addImageUrlAt(url, e.clientX, e.clientY)) showToast('Drop an image file or image link');
+      if (addImageUrlAt(url, e.clientX, e.clientY)) return;
+      // Google Images & co. often provide only HTML: extract the first <img>
+      const html = dt.getData('text/html') || '';
+      const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (m && addImageUrlAt(m[1], e.clientX, e.clientY)) return;
+      showToast('Drop an image file or image link');
     });
     document.addEventListener('paste', (e) => {
       if (isTypingTarget(e.target)) return;
       const items = (e.clipboardData && e.clipboardData.items) || [];
       for (const it of items) {
-        if (it.type && it.type.startsWith('image/')) {
+        if (it.type && (it.type.startsWith('image/') || it.type.startsWith('video/'))) {
           const f = it.getAsFile();
           if (f && handleImageFile(f)) { e.preventDefault(); return; }
         }
@@ -2863,7 +3065,7 @@
       else if (k === '+' || k === '=') updateZoom(0.08, window.innerWidth / 2, window.innerHeight / 2);
       else if (k === '-' || k === '_') updateZoom(-0.08, window.innerWidth / 2, window.innerHeight / 2);
       else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); return; }
-      if (e.key === 'Escape') { if (isExporting) exportCancelled = true; toggleShortcuts(false); closeAllPanels(); if (marquee) cancelMarquee(false); selectElement(null); if (document.body.classList.contains('preview-mode')) togglePreview(); }
+      if (e.key === 'Escape') { if (isExporting) exportCancelled = true; toggleShortcuts(false); closeAllPanels(); if (marquee) cancelMarquee(true); else selectElement(null); if (document.body.classList.contains('preview-mode')) togglePreview(); }
     });
     document.addEventListener('keyup', e => {
       if (e.code === 'Space') { spaceDown = false; syncBoardCursor(); }
@@ -2982,6 +3184,7 @@
       if (!e.target.closest('#shareMenu, #shareBtn')) document.getElementById('shareMenu')?.classList.remove('visible');
       if (!e.target.closest('#shapesMenu, #shapesBtn, #dockShapesBtn')) document.getElementById('shapesMenu')?.classList.remove('visible');
       if (!e.target.closest('#stickyMenu, #stickyBtn, #dockStickyBtn')) document.getElementById('stickyMenu')?.classList.remove('visible');
+      syncPenPopover();
     });
 
     // Bottom dock bindings
