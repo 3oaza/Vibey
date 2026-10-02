@@ -61,7 +61,8 @@
     body.theme-light #iconMoon { display: inline; }
     body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; overflow: hidden; width: 100vw; height: 100vh; cursor: default; touch-action: none; }
 
-    .canvas-bg { position: fixed; inset: 0; z-index: 0; background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px); background-size: 24px 24px; pointer-events: none; }
+    .canvas-bg { display: none; }
+    #dots-canvas { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
 
     /* UI Layout */
     header { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; height: 52px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; background: rgba(8, 8, 10, 0.8); backdrop-filter: blur(20px); border-bottom: 1px solid var(--border); transition: transform 0.3s, opacity 0.3s; }
@@ -71,8 +72,8 @@
     .zoom-nav { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 1000; height: 40px; padding: 0 8px; display: flex; align-items: center; gap: 4px; background: var(--glass); backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 99px; transition: transform 0.3s, opacity 0.3s; }
 
     /* Panels & Modals */
-    .side-panel { position: fixed; top: 68px; left: 24px; width: 236px; height: 420px; background: var(--glass); backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 24px; padding: 14px; z-index: 900; box-shadow: var(--shadow-lg); transition: opacity 0.2s ease; opacity: 0; visibility: hidden; pointer-events: none; overflow: hidden; display: flex; flex-direction: column; }
-    .side-panel.visible { opacity: 1; visibility: visible; pointer-events: auto; }
+    .side-panel { position: fixed; top: 68px; left: 24px; width: 236px; height: 420px; background: var(--glass); backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 24px; padding: 14px; z-index: 900; box-shadow: var(--shadow-lg); transition: opacity 0.25s ease, transform 0.3s cubic-bezier(0.34, 1.3, 0.64, 1), visibility 0.25s; opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(12px) scale(0.97); overflow: hidden; display: flex; flex-direction: column; }
+    .side-panel.visible { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0) scale(1); }
     .side-panel.dragging { transition: none; }
     #menuPanel { left: 24px; top: 68px; width: 220px; height: auto; }
     #queuePanel { left: 268px; top: 68px; width: 230px; height: 360px; }
@@ -82,36 +83,78 @@
     .side-panel.dragging .panel-header { cursor: grabbing; }
     .panel-grip { width: 28px; height: 28px; border-radius: 10px; background: rgba(255,255,255,0.04); display: inline-flex; align-items: center; justify-content: center; color: #677489; flex-shrink: 0; }
 
-    .modal-menu { position: fixed; top: 60px; right: 70px; width: 200px; background: var(--glass); backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 16px; padding: 8px; z-index: 1100; box-shadow: var(--shadow-lg); opacity: 0; transform: translateY(-10px); pointer-events: none; transition: 0.2s; }
-    .modal-menu.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
-    .modal-item { padding: 10px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 10px; color: #94a3b8; }
-    .modal-item:hover { background: rgba(255, 255, 255, 0.05); color: white; }
+    .modal-menu { position: fixed; top: 60px; right: 70px; width: 200px; background: var(--glass); backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 16px; padding: 8px; z-index: 1100; box-shadow: var(--shadow-lg); opacity: 0; transform: translateY(-10px) scale(0.96); pointer-events: none; transition: opacity 0.25s ease, transform 0.28s cubic-bezier(0.34, 1.3, 0.64, 1); transform-origin: top right; }
+    .modal-menu.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+    .modal-item { padding: 10px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 10px; color: #94a3b8; transition: background 0.15s, color 0.15s, transform 0.15s; }
+    .modal-item:hover { background: rgba(255, 255, 255, 0.05); color: white; transform: translateX(2px); }
 
     /* Toast */
-    #toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(139, 137, 255, 0.15); border: 1px solid rgba(139, 137, 255, 0.4); color: #c4c3ff; font-size: 12px; font-weight: 600; padding: 8px 20px; border-radius: 99px; z-index: 3000; opacity: 0; transition: all 0.3s; pointer-events: none; white-space: nowrap; }
-    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(20px) scale(0.9); background: rgba(139, 137, 255, 0.15); border: 1px solid rgba(139, 137, 255, 0.4); color: #c4c3ff; font-size: 12px; font-weight: 600; padding: 8px 20px; border-radius: 99px; z-index: 3000; opacity: 0; transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); pointer-events: none; white-space: nowrap; backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgba(139, 137, 255, 0.25); }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 
     /* Buttons */
-    button { background: none; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #94a3b8; transition: 0.2s; }
-    button:hover { color: #f1f5f9; transform: scale(1.05); }
+    button { background: none; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #94a3b8; transition: color 0.2s, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s, box-shadow 0.2s; }
+    button:hover { color: #f1f5f9; transform: scale(1.12); }
+    button:active { transform: scale(0.92); }
     .btn-circle { width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 255, 255, 0.05); }
-    .btn-accent { width: 32px; height: 32px; border-radius: 50%; background: #8b89ff; color: #08080a; }
+    .btn-circle:hover { background: rgba(255, 255, 255, 0.09); box-shadow: 0 0 0 4px rgba(139, 137, 255, 0.12); }
+    .btn-circle:active { box-shadow: 0 0 0 6px rgba(139, 137, 255, 0.18); }
+    .btn-accent { width: 32px; height: 32px; border-radius: 50%; background: #8b89ff; color: #08080a; box-shadow: 0 4px 14px rgba(139, 137, 255, 0.35); }
+    .btn-accent:hover { background: #9d9bff; box-shadow: 0 6px 20px rgba(139, 137, 255, 0.55); }
+    .btn-accent:active { box-shadow: 0 2px 8px rgba(139, 137, 255, 0.4); }
     .tool-item { width: 40px; height: 40px; border-radius: 50%; }
-    .tool-item.active { background: rgba(139, 137, 255, 0.15); color: var(--accent); }
+    .tool-item:hover { transform: scale(1.1) translateY(-1px); background: rgba(255, 255, 255, 0.05); }
+    .tool-item:active { transform: scale(0.94); }
+    .tool-item.active { background: rgba(139, 137, 255, 0.15); color: var(--accent); box-shadow: 0 0 0 4px rgba(139, 137, 255, 0.15); }
+    .tool-item.active:hover { background: rgba(139, 137, 255, 0.22); }
 
     /* Cursor */
     #custom-cursor { display: none; }
+    #brush-cursor { position: fixed; left: 0; top: 0; z-index: 2500; pointer-events: none; border-radius: 50%; border: 1.5px solid #8b89ff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 12px rgba(139, 137, 255, 0.35); transform: translate(-50%, -50%); display: none; transition: width 0.15s, height 0.15s; }
 
     /* Draggable Elements */
-    .board-item { position: absolute; border: 2px solid transparent; border-radius: 0px; cursor: grab; transition: border-color 0.2s, box-shadow 0.2s; }
+    .board-item { position: absolute; border: 2px solid transparent; border-radius: 0px; cursor: grab; transition: border-color 0.25s, box-shadow 0.25s, transform 0.15s ease; }
+    .board-item:hover { box-shadow: 0 0 0 2px rgba(139, 137, 255, 0.25), 0 8px 24px rgba(0, 0, 0, 0.25); }
+    .board-item.selected { border-color: transparent; box-shadow: none; }
+    .board-item:active { cursor: grabbing; }
     .board-item img { display: block; width: 100%; height: 100%; border-radius: 0px; pointer-events: none; -webkit-user-drag: none; object-fit: contain; }
     .resizer { position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; background: var(--accent); border: 2px solid var(--bg); border-radius: 50%; cursor: nwse-resize; display: none; z-index: 20; }
-    .board-item.selected .resizer { display: block; }
+    .board-item.selected .resizer { display: none; }
+
+    /* Miro-style selection frame: blue box + white handles */
+    #selection-frame { position: absolute; border: 1.5px solid var(--accent); border-radius: 3px; pointer-events: none; z-index: 2000; display: none; box-shadow: 0 0 0 1px rgba(139, 137, 255, 0.3); }
+    #selection-frame.visible { display: block; }
+    .sel-handle { position: absolute; width: 12px; height: 12px; background: #fff; border: 2px solid var(--accent); border-radius: 50%; pointer-events: auto; transform: translate(-50%, -50%); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); }
+    body.preview-mode #selection-frame { display: none; }
+    body.tool-select .group-layer.selected { border: 1px dashed var(--accent); }
+    /* Selection visuals only with the Select tool */
+    body:not(.tool-select) #selection-frame,
+    body:not(.tool-select) #nodeButtons,
+    body:not(.tool-select) .text-toolbar,
+    body:not(.tool-select) .diagram-bar { display: none !important; }
+    /* Diagram node frame: Miro blue + square handles */
+    #selection-frame.node-mode { border-color: #2ea6ff; box-shadow: 0 0 0 1px rgba(46, 166, 255, 0.35); }
+    #selection-frame.node-mode .sel-handle { border-radius: 3px; background: #fff; border-color: #2ea6ff; }
+    /* Hide group dashed outline while a node is selected */
+    body.node-selected .group-layer { border-color: transparent; }
+    /* Diagram node buttons (Miro-style + / check) */
+    #nodeButtons { position: fixed; inset: 0; z-index: 1600; pointer-events: none; display: none; }
+    #nodeButtons.visible { display: block; }
+    #nodeButtons button { position: absolute; width: 30px; height: 30px; border-radius: 50%; background: #fff; border: 2px solid #2ea6ff; color: #2ea6ff; display: flex; align-items: center; justify-content: center; pointer-events: auto; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); padding: 0; }
+    #nodeButtons button:hover { transform: scale(1.12); color: #2ea6ff; background: #fff; }
+    #nodeButtons button:active { transform: scale(0.92); }
+    #nodeButtons .icon-svg { width: 15px; height: 15px; }
+    #marquee { position: fixed; z-index: 1500; background: rgba(139, 137, 255, 0.12); border: 1px solid var(--accent); display: none; pointer-events: none; }
+    #marquee.visible { display: block; }
     .board-text { min-width: 50px; min-height: 20px; padding: 8px; color: white; outline: none; font-size: 16px; font-weight: 500; word-break: break-all; user-select: text; }
+    .board-item svg.vibey-stroke { display: block; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+    .sticky-note { border-radius: 6px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35); padding: 14px; }
+    .sticky-note:hover { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45), 0 0 0 2px rgba(139, 137, 255, 0.25); }
+    .sticky-text { width: 100%; height: 100%; overflow-y: auto; outline: none; font-size: 20px; font-weight: 500; line-height: 1.4; word-break: break-word; user-select: text; }
+    .sticky-text:empty:before { content: 'Text here'; opacity: 0.45; }
 
     /* Groups */
     .group-layer { border: 1px dashed rgba(255,255,255,0.2); pointer-events: none; }
-    .group-layer.selected { border: 1px dashed var(--accent); }
     .group-layer.dragging { border-color: var(--accent); }
     .group-content { position: relative; width: 100%; height: 100%; pointer-events: auto; }
     .group-content .board-item { pointer-events: auto; }
@@ -121,8 +164,9 @@
     .layer-item.indent-3 { margin-left: 36px; }
 
     /* Queue Panel Items */
-    .queue-item { position: relative; border-radius: 12px; overflow: hidden; flex-shrink: 0; cursor: pointer; border: 2px solid transparent; transition: border-color 0.2s; }
-    .queue-item:hover { border-color: var(--accent); }
+    .queue-item { position: relative; border-radius: 12px; overflow: hidden; flex-shrink: 0; cursor: pointer; border: 2px solid transparent; transition: border-color 0.2s, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s; }
+    .queue-item:hover { border-color: var(--accent); transform: translateY(-2px) scale(1.02); box-shadow: 0 10px 24px rgba(139, 137, 255, 0.2); }
+    .queue-item:active { transform: scale(0.97); }
     .queue-item img { width: 100%; display: block; object-fit: cover; height: 120px; }
     .queue-item .add-overlay { position: absolute; inset: 0; background: rgba(139,137,255,0.2); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
     .queue-item:hover .add-overlay { opacity: 1; }
@@ -222,6 +266,84 @@
     .icon-btn { width: 28px; height: 28px; border-radius: 10px; background: rgba(255,255,255,0.04); color: #8fa2bd; }
     .icon-btn:hover { background: rgba(255,255,255,0.08); }
     .layer-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+
+    /* Floating text toolbar */
+    .text-toolbar { position: fixed; z-index: 1500; display: none; align-items: center; gap: 2px; background: var(--glass); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 14px; padding: 6px 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+    .text-toolbar.visible { display: flex; }
+    .text-toolbar button { width: 30px; height: 30px; border-radius: 9px; font-size: 13px; color: #cbd5e1; }
+    .text-toolbar button:hover { background: rgba(255, 255, 255, 0.07); color: #fff; transform: none; }
+    .text-toolbar button.active { background: rgba(139, 137, 255, 0.2); color: var(--accent); }
+    .text-toolbar button:active { transform: scale(0.9); }
+    #ttSize { width: 46px; background: rgba(255, 255, 255, 0.05); border: 1px solid transparent; border-radius: 8px; color: #fff; font-size: 12px; font-weight: 700; text-align: center; padding: 5px 2px; outline: none; }
+    #ttSize:focus { border-color: var(--accent); }
+    #ttSize::-webkit-inner-spin-button { display: none; }
+    .tt-sep { width: 1px; height: 20px; background: rgba(255, 255, 255, 0.08); margin: 0 4px; flex-shrink: 0; }
+    .tt-color { position: relative; width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; cursor: pointer; color: #cbd5e1; border-bottom: 3px solid #fff; }
+    .tt-color:hover { background: rgba(255, 255, 255, 0.07); }
+    .tt-color input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    body.preview-mode .text-toolbar { display: none; }
+    body.theme-light .text-toolbar { background: rgba(255, 255, 255, 0.88); }
+    body.theme-light .text-toolbar button { color: #5b6474; }
+    body.theme-light .text-toolbar button:hover { background: rgba(20, 25, 40, 0.06); color: #171a21; }
+    body.theme-light #ttSize { background: rgba(20, 25, 40, 0.05); color: #171a21; }
+    body.theme-light .tt-sep { background: rgba(20, 25, 40, 0.1); }
+    body.theme-light .tt-color { color: #5b6474; }
+
+    /* Shapes bar (horizontal strip) */
+    .shapes-menu { position: fixed; left: 50%; right: auto; top: auto; bottom: 88px; transform: translateX(-50%) translateY(12px) scale(0.97); width: auto; max-width: calc(100vw - 32px); overflow-x: auto; display: flex; align-items: center; gap: 2px; background: var(--glass); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 99px; padding: 8px 12px; z-index: 1100; box-shadow: var(--shadow-lg); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.22s ease, transform 0.25s cubic-bezier(0.34, 1.3, 0.64, 1), visibility 0.22s; }
+    .shapes-menu.visible { opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(-50%) translateY(0) scale(1); }
+    .shape-cell { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #94a3b8; flex-shrink: 0; transition: background 0.15s, color 0.15s, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1); }
+    .shape-cell:hover { background: rgba(255, 255, 255, 0.07); color: #fff; transform: translateY(-2px); }
+    .shape-cell:active { transform: scale(0.9); }
+    .shape-cell.active { background: rgba(139, 137, 255, 0.18); color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 137, 255, 0.25); }
+    .shape-cell .icon-svg { width: 20px; height: 20px; }
+    .pen-dot span { width: 20px; height: 20px; border-radius: 50%; background: #8b89ff; border: 2px solid rgba(255, 255, 255, 0.45); display: block; }
+    body.theme-light .shape-cell { color: #5b6474; }
+    body.theme-light .shape-cell:hover { background: rgba(20, 25, 40, 0.06); color: #171a21; }
+
+    /* Sticky notes strip (horizontal dots row) */
+    .sticky-menu { position: fixed; left: 50%; right: auto; top: auto; bottom: 88px; transform: translateX(-50%) translateY(12px) scale(0.97); width: auto; max-width: calc(100vw - 32px); overflow-x: auto; background: var(--glass); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 99px; padding: 10px 16px; z-index: 1100; box-shadow: var(--shadow-lg); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.22s ease, transform 0.25s cubic-bezier(0.34, 1.3, 0.64, 1), visibility 0.22s; }
+    .sticky-menu.visible { opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(-50%) translateY(0) scale(1); }
+    .sticky-row { display: flex; align-items: center; gap: 8px; }
+    .sticky-swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.2); cursor: pointer; transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.15s, box-shadow 0.15s; padding: 0; flex-shrink: 0; }
+    .sticky-swatch:hover { transform: scale(1.25); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4); }
+    .sticky-swatch:active { transform: scale(0.9); }
+    .sticky-swatch.active { border-color: #fff; box-shadow: 0 0 0 3px rgba(139, 137, 255, 0.45); }
+    .sticky-action { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; background: rgba(255, 255, 255, 0.05); color: #dbe3f0; flex-shrink: 0; }
+    .sticky-action:hover { background: rgba(255, 255, 255, 0.1); transform: translateY(-2px); color: #fff; }
+    .sticky-action:active { transform: scale(0.9); }
+    .sticky-action .icon-svg { width: 18px; height: 18px; }
+    body.theme-light .sticky-action { background: rgba(20, 25, 40, 0.05); color: #2b3140; }
+
+    /* Bottom dock */
+    .toolbar-right { display: none; }
+    .dock { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 6px; background: var(--glass); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 99px; padding: 8px 14px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); max-width: calc(100vw - 32px); overflow-x: auto; transition: transform 0.3s, opacity 0.3s; }
+    .dock .tool-item { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; }
+    .dock-sep { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+    .dock .zoom-nav { position: static; transform: none; background: transparent; border: none; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; height: auto; padding: 0; flex-shrink: 0; }
+    .dock-zoom-slot { display: flex; align-items: center; flex-shrink: 0; }
+    body.preview-mode .dock { transform: translateX(-50%) translateY(100px); opacity: 0; pointer-events: none; }
+    body.preview-mode .dock .zoom-nav { transform: none; opacity: 1; }
+    body.preview-mode .pen-popover { opacity: 0; pointer-events: none; }
+    .pen-popover { position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%) translateY(8px) scale(0.96); z-index: 1000; display: flex; align-items: center; gap: 12px; background: var(--glass); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 99px; padding: 8px 16px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.22s, transform 0.25s cubic-bezier(0.34, 1.3, 0.64, 1), visibility 0.22s; }
+    .pen-popover.visible { opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(-50%) translateY(0) scale(1); }
+    .pen-colors { display: flex; align-items: center; gap: 6px; }
+    .pen-swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.15); cursor: pointer; padding: 0; transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.15s, box-shadow 0.15s; }
+    .pen-swatch:hover { transform: scale(1.2); }
+    .pen-swatch:active { transform: scale(0.9); }
+    .pen-swatch.active { border-color: #fff; box-shadow: 0 0 0 3px rgba(139, 137, 255, 0.4); }
+    .pen-size-row { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em; color: #94a3b8; }
+    .pen-size-row input { width: 90px; accent-color: var(--accent); cursor: pointer; }
+    body.theme-light .pen-size-row { color: #7c8598; }
+
+    /* Diagram bar */
+    .diagram-bar { position: fixed; z-index: 1500; display: none; align-items: center; gap: 6px; background: var(--glass); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 99px; padding: 6px 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+    .diagram-bar.visible { display: flex; }
+    .diagram-bar button { padding: 7px 14px; border-radius: 99px; background: rgba(255, 255, 255, 0.05); color: #dbe3f0; font-size: 11px; font-weight: 800; white-space: nowrap; }
+    .diagram-bar button:hover { background: rgba(139, 137, 255, 0.2); color: var(--accent); transform: translateY(-1px); }
+    .diagram-bar button:active { transform: scale(0.94); }
+    body.preview-mode .diagram-bar { display: none; }
+    body.theme-light .diagram-bar button { background: rgba(20, 25, 40, 0.05); color: #2b3140; }
 
     /* Export loading */
     .export-loading { opacity: 0.5; pointer-events: none; }
@@ -324,6 +446,7 @@
 <body>
   <div id="custom-cursor"></div>
   <div class="canvas-bg"></div>
+  <canvas id="dots-canvas"></canvas>
   <div id="toast"></div>
 
   <!-- Header -->
@@ -390,9 +513,10 @@
         <button id="shortcutsClose" class="icon-btn" aria-label="Close shortcuts">×</button>
       </div>
       <div class="shortcut-group">Tools</div>
-      <div class="shortcut-row"><span>Select / Draw / Text</span><span><kbd>V</kbd> <kbd>D</kbd> <kbd>T</kbd></span></div>
+      <div class="shortcut-row"><span>Select / Hand / Draw / Text</span><span><kbd>V</kbd> <kbd>H</kbd> <kbd>D</kbd> <kbd>T</kbd></span></div>
+      <div class="shortcut-row"><span>Eraser</span><span><kbd>X</kbd></span></div>
       <div class="shortcut-row"><span>Upload image</span><span><kbd>I</kbd></span></div>
-      <div class="shortcut-row"><span>Pen / Rectangle / Circle (in Draw)</span><span><kbd>P</kbd> <kbd>R</kbd> <kbd>C</kbd></span></div>
+      <div class="shortcut-row"><span>Pen / Rect / Circle / Oval (in Draw)</span><span><kbd>P</kbd> <kbd>R</kbd> <kbd>C</kbd> <kbd>O</kbd></span></div>
       <div class="shortcut-group">Panels</div>
       <div class="shortcut-row"><span>Queue / Layers / Settings</span><span><kbd>Q</kbd> <kbd>L</kbd> <kbd>S</kbd></span></div>
       <div class="shortcut-row"><span>Toggle grid snap</span><span><kbd>G</kbd></span></div>
@@ -404,6 +528,7 @@
       <div class="shortcut-row"><span>Pick color (hold + click image)</span><span><kbd>E</kbd></span></div>
       <div class="shortcut-group">View</div>
       <div class="shortcut-row"><span>Zoom in / out</span><span><kbd>+</kbd> <kbd>-</kbd></span></div>
+      <div class="shortcut-row"><span>Pan canvas</span><span><kbd>Space</kbd> + drag</span></div>
       <div class="shortcut-row"><span>Commands</span><span><kbd>Ctrl+P</kbd></span></div>
       <div class="shortcut-row"><span>Close / deselect</span><span><kbd>Esc</kbd></span></div>
     </div>
@@ -570,6 +695,12 @@
     <button class="tool-item" data-tool="text" title="Text (T)" aria-label="Text">
       <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14"/><path d="M12 6v12"/><path d="M8 18h8"/></svg>
     </button>
+    <button class="tool-item" id="shapesBtn" title="Shapes" aria-label="Shapes">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/><circle cx="16.5" cy="15.5" r="4.5"/></svg>
+    </button>
+    <button class="tool-item" id="stickyBtn" title="Sticky note" aria-label="Sticky note">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="16" rx="1.5"/><path d="M8.5 9.5h7M8.5 13h5"/></svg>
+    </button>
     <button class="tool-item" id="imageToolBtn" title="Upload Image (I)" aria-label="Upload image">
       <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="m7 15 3-3 3 3 2-2 2 2"/><circle cx="9" cy="9" r="1.2"/></svg>
     </button>
@@ -587,6 +718,142 @@
       <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M12 18v3M4.8 6.8l2.1 2.1M17.1 17.1l2.1 2.1M3 12h3M18 12h3M4.8 17.2l2.1-2.1M17.1 8.9l2.1-2.1"/><circle cx="12" cy="12" r="3.5"/></svg>
     </button>
   </aside>
+
+  <!-- Bottom dock (Miro-style: everything at the bottom) -->
+  <div id="dock" class="dock">
+    <button class="tool-item active" data-tool="select" title="Select (V)" aria-label="Select">
+      <svg class="icon-svg fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l13 8-6 2 3 7-2.2 1-3.1-7L5 17z"/></svg>
+    </button>
+    <button class="tool-item" data-tool="hand" title="Pan (H)" aria-label="Pan">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12V6a1.5 1.5 0 0 1 3 0v5V4.8a1.5 1.5 0 0 1 3 0V11v-5a1.5 1.5 0 0 1 3 0v6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.6 7-6.3 7-2.6 0-4.2-1.1-5.5-3.6l-1.6-3c-.5-1 .1-2.1 1.1-2.3.6-.1 1.2.1 1.6.6z"/></svg>
+    </button>
+    <button class="tool-item" data-tool="eraser" title="Eraser (X)" aria-label="Eraser">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 15.5 14 8a2 2 0 0 1 2.8 0l2.7 2.7a2 2 0 0 1 0 2.8l-4.5 4.5H9.5z"/><path d="M6.5 15.5 10 19"/><path d="M4 21h16"/></svg>
+    </button>
+    <div class="dock-sep"></div>
+    <button class="tool-item" data-tool="draw" title="Pen (D)" aria-label="Pen">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4.5-1 9.8-9.8a2.2 2.2 0 0 0 0-3.1l-.4-.4a2.2 2.2 0 0 0-3.1 0L5 15.5z"/><path d="M13.5 6.5l4 4"/></svg>
+    </button>
+    <button class="tool-item" id="dockShapesBtn" title="Shapes" aria-label="Shapes">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/><circle cx="16.5" cy="15.5" r="4.5"/></svg>
+    </button>
+    <button class="tool-item" id="dockStickyBtn" title="Sticky note" aria-label="Sticky note">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="16" rx="1.5"/><path d="M8.5 9.5h7M8.5 13h5"/></svg>
+    </button>
+    <button class="tool-item" data-tool="text" title="Text (T)" aria-label="Text">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14"/><path d="M12 6v12"/><path d="M8 18h8"/></svg>
+    </button>
+    <button class="tool-item" id="dockImageBtn" title="Upload Image (I)" aria-label="Upload image">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="m7 15 3-3 3 3 2-2 2 2"/><circle cx="9" cy="9" r="1.2"/></svg>
+    </button>
+    <div class="dock-sep"></div>
+    <button class="tool-item" id="dockQueueBtn" title="Queue (Q)" aria-label="Queue">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12"/><path d="M6 12h8"/><path d="M6 17h10"/><circle cx="18" cy="12" r="1.2"/></svg>
+    </button>
+    <button class="tool-item" id="dockLayersBtn" title="Layers (L)" aria-label="Layers">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 4 8 4-8 4-8-4 8-4z"/><path d="m4 12 8 4 8-4"/><path d="m4 16 8 4 8-4"/></svg>
+    </button>
+    <button class="tool-item" id="dockDuplicateBtn" title="Duplicate (Ctrl+D)" aria-label="Duplicate">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"/><rect x="5" y="5" width="10" height="10" rx="2"/></svg>
+    </button>
+    <button class="tool-item" id="dockSettingsBtn" title="Settings (S)" aria-label="Settings">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M12 18v3M4.8 6.8l2.1 2.1M17.1 17.1l2.1 2.1M3 12h3M18 12h3M4.8 17.2l2.1-2.1M17.1 8.9l2.1-2.1"/><circle cx="12" cy="12" r="3.5"/></svg>
+    </button>
+    <div class="dock-sep"></div>
+    <button class="tool-item" id="dockUndoBtn" title="Undo (Ctrl+Z)" aria-label="Undo">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5 3 10l5 5"/><path d="M3 10h11a6 6 0 0 1 0 12h-2"/></svg>
+    </button>
+    <button class="tool-item" id="dockRedoBtn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
+      <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 5 5 5-5 5"/><path d="M21 10H10a6 6 0 0 0 0 12h2"/></svg>
+    </button>
+    <div class="dock-sep"></div>
+    <span id="dockZoomSlot" class="dock-zoom-slot"></span>
+  </div>
+
+  <!-- Pen popover: quick colors + size -->
+  <div id="penPopover" class="pen-popover">
+    <div class="pen-colors">
+      <button class="pen-swatch" data-color="#ffffff" style="background:#ffffff" title="White"></button>
+      <button class="pen-swatch" data-color="#f87171" style="background:#f87171" title="Red"></button>
+      <button class="pen-swatch" data-color="#fb923c" style="background:#fb923c" title="Orange"></button>
+      <button class="pen-swatch" data-color="#facc15" style="background:#facc15" title="Yellow"></button>
+      <button class="pen-swatch" data-color="#4ade80" style="background:#4ade80" title="Green"></button>
+      <button class="pen-swatch" data-color="#60a5fa" style="background:#60a5fa" title="Blue"></button>
+      <button class="pen-swatch" data-color="#8b89ff" style="background:#8b89ff" title="Vibey"></button>
+      <button class="pen-swatch" data-color="#f472b6" style="background:#f472b6" title="Pink"></button>
+      <button class="pen-swatch" data-color="#232323" style="background:#232323" title="Black"></button>
+    </div>
+    <div class="pen-size-row"><span>Size</span><input type="range" id="penSize" min="1" max="50" value="3"></div>
+  </div>
+
+  <!-- Shapes Bar (horizontal strip) -->
+  <div id="shapesMenu" class="shapes-menu">
+    <button class="shape-cell pen-dot" id="shapePenDot" title="Pen"><span id="shapePenDotColor"></span></button>
+    <button class="shape-cell" data-shape="line" title="Line"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M5 19 19 5"/></svg></button>
+    <button class="shape-cell" data-shape="arrow" title="Arrow"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M5 19 17 7"/><path d="M11 7h6v6"/></svg></button>
+    <button class="shape-cell" data-shape="elbow" title="Elbow arrow"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M6 20h8V6"/><path d="M10 10l4-4 4 4"/></svg></button>
+    <button class="shape-cell" data-shape="block" title="Block arrow"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M4 9h6V5l7 7-7 7v-4H4z"/></svg></button>
+    <button class="shape-cell" data-shape="divider" title="Divider"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M4 12h16"/></svg></button>
+    <button class="shape-cell" data-shape="rect" title="Rectangle (R)"><svg class="icon-svg" viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="10" rx="1.5"/></svg></button>
+    <button class="shape-cell" data-shape="oval" title="Oval (O)"><svg class="icon-svg" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="5.5"/></svg></button>
+    <button class="shape-cell" data-shape="rhombus" title="Rhombus"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 4l7 8-7 8-7-8z"/></svg></button>
+    <button class="shape-cell" data-shape="triangle" title="Triangle"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 5l8 14H4z"/></svg></button>
+    <button class="shape-cell" data-shape="tridown" title="Inverted triangle"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 19L4 5h16z"/></svg></button>
+    <button class="shape-cell" data-shape="cylinder" title="Cylinder"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M6 7v10c0 1.7 2.7 3 6 3s6-1.3 6-3V7"/><ellipse cx="12" cy="7" rx="6" ry="2.5"/></svg></button>
+    <button class="shape-cell" id="shapeDiagramBtn" title="Diagram"><svg class="icon-svg" viewBox="0 0 24 24"><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="7" r="2.5"/><circle cx="12" cy="17" r="2.5"/><path d="M9 8.5l2 6M15 8.5l-2 6M9.5 7h5"/></svg></button>
+  </div>
+
+  <!-- Sticky Notes Strip (horizontal dots row) -->
+  <div id="stickyMenu" class="sticky-menu">
+    <div class="sticky-row">
+      <button class="sticky-swatch" data-color="#FFFFFF" style="background:#FFFFFF" title="White"></button>
+      <button class="sticky-swatch" data-color="#C9D9FA" style="background:#C9D9FA" title="Light blue"></button>
+      <button class="sticky-swatch" data-color="#FFF7AE" style="background:#FFF7AE" title="Light yellow"></button>
+      <button class="sticky-swatch" data-color="#F7DE00" style="background:#F7DE00" title="Yellow"></button>
+      <button class="sticky-swatch" data-color="#FFC078" style="background:#FFC078" title="Orange"></button>
+      <button class="sticky-swatch" data-color="#FFA2B1" style="background:#FFA2B1" title="Coral"></button>
+      <button class="sticky-swatch" data-color="#F9C6E7" style="background:#F9C6E7" title="Light pink"></button>
+      <button class="sticky-swatch" data-color="#F261C1" style="background:#F261C1" title="Pink"></button>
+      <button class="sticky-swatch" data-color="#8B8FF9" style="background:#8B8FF9" title="Periwinkle"></button>
+      <button class="sticky-swatch" data-color="#A9E6FC" style="background:#A9E6FC" title="Light cyan"></button>
+      <button class="sticky-swatch" data-color="#57A8F5" style="background:#57A8F5" title="Blue"></button>
+      <button class="sticky-swatch" data-color="#8AF0D9" style="background:#8AF0D9" title="Teal"></button>
+      <button class="sticky-swatch" data-color="#3ED598" style="background:#3ED598" title="Green"></button>
+      <button class="sticky-swatch" data-color="#D8F572" style="background:#D8F572" title="Lime"></button>
+      <button class="sticky-swatch" data-color="#7BD747" style="background:#7BD747" title="Fresh green"></button>
+      <button class="sticky-swatch" data-color="#232323" style="background:#232323" title="Black"></button>
+      <button class="sticky-action" id="stickyGenerateBtn" title="Generate"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 4l1.7 4.6L18 10l-4.3 1.4L12 16l-1.7-4.6L6 10l4.3-1.4z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg></button>
+      <button class="sticky-action" id="stickyStackBtn" title="Stack selected"><svg class="icon-svg" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="1.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button>
+    </div>
+  </div>
+
+  <!-- Floating text toolbar (Miro-style) -->
+  <div id="textToolbar" class="text-toolbar">
+    <button id="ttDecrease" title="Smaller" aria-label="Decrease font size">−</button>
+    <input id="ttSize" type="number" min="8" max="200" value="24" title="Font size">
+    <button id="ttIncrease" title="Bigger" aria-label="Increase font size">+</button>
+    <div class="tt-sep"></div>
+    <button id="ttBold" title="Bold" aria-label="Bold"><b>B</b></button>
+    <button id="ttItalic" title="Italic" aria-label="Italic"><i>I</i></button>
+    <div class="tt-sep"></div>
+    <button id="ttAlignLeft" title="Align left" aria-label="Align left"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M4 6h16M4 10h10M4 14h16M4 18h10"/></svg></button>
+    <button id="ttAlignCenter" title="Align center" aria-label="Align center"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M4 6h16M7 10h10M4 14h16M7 18h10"/></svg></button>
+    <button id="ttAlignRight" title="Align right" aria-label="Align right"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M4 6h16M10 10h10M4 14h16M10 18h10"/></svg></button>
+    <div class="tt-sep"></div>
+    <label class="tt-color" title="Text color">A<input type="color" id="ttColor" value="#ffffff"></label>
+  </div>
+
+  <!-- Diagram bar: add branches left/right -->
+  <div id="diagramBar" class="diagram-bar">
+    <button id="diagramAddLeft" title="Add branch on the left">+ Left</button>
+    <button id="diagramAddRight" title="Add branch on the right">+ Right</button>
+  </div>
+
+  <!-- Diagram node buttons (Miro-style add / done) -->
+  <div id="nodeButtons">
+    <button id="nodeAddBtn" title="Add branch"><svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button id="nodeDoneBtn" title="Done editing"><svg class="icon-svg" viewBox="0 0 24 24"><path d="m5 13 4 4L19 7"/></svg></button>
+  </div>
 
   <!-- Zoom Controls -->
   <nav class="zoom-nav" id="zoomNav">
