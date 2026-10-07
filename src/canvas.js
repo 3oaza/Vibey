@@ -226,17 +226,27 @@
       });
     }
 
-    function updateTool(newTool) {
+    function updateTool(newTool, keepShape) {
       state.tool = newTool;
       document.querySelectorAll('.tool-item[data-tool]').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tool === newTool);
       });
       document.body.classList.toggle('tool-select', newTool === 'select');
+      // Entering the Pen/Draw tool cancels any active Shape mode,
+      // unless the call comes from setDrawShape (which just picked a shape).
+      if (newTool === 'draw' && !keepShape && state.drawShape !== 'pen') {
+        state.drawShape = 'pen';
+        document.querySelectorAll('[data-shape]').forEach(b => b.classList.toggle('active', b.dataset.shape === 'pen'));
+        document.querySelectorAll('#shapesBtn, #dockShapesBtn').forEach(sBtn => sBtn.classList.remove('active'));
+      }
+      if (newTool !== 'draw') {
+        document.getElementById('shapesMenu')?.classList.remove('visible');
+        document.querySelectorAll('#shapesBtn, #dockShapesBtn').forEach(sBtn => sBtn.classList.remove('active'));
+      }
       syncBoardCursor();
       UI.canvas.classList.toggle('active', newTool === 'draw');
 
       document.getElementById('brushSettings').style.display = newTool === 'draw' ? 'block' : 'none';
-      if (newTool !== 'draw') document.getElementById('shapesMenu')?.classList.remove('visible');
       syncPenPopover();
       if (newTool === 'draw') selectElement(null);
     }
@@ -2094,7 +2104,7 @@
     }
     function setDrawShape(shape) {
       state.drawShape = shape;
-      if (state.tool !== 'draw') updateTool('draw');
+      if (state.tool !== 'draw') updateTool('draw', true);
       else syncBoardCursor();
       document.querySelectorAll('[data-shape]').forEach(b => b.classList.toggle('active', b.dataset.shape === shape));
       document.querySelectorAll('.shape-cell[data-shape]').forEach(b => b.classList.toggle('active', b.dataset.shape === shape));
