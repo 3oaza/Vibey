@@ -1758,11 +1758,12 @@
         const eye = hidden
           ? '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.6 6.6C3.8 8.3 2 12 2 12s3.5 7 10 7c1.5 0 2.9-.4 4.1-.9"/></svg>'
           : '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
-        html += `<div class="layer-item ${state.selectedIds.includes(el.id) ? 'active' : ''}" data-layer-id="${el.id}">
+        const safeId = escapeHtmlAttr(el.id || '');
+        html += `<div class="layer-item ${state.selectedIds.includes(el.id) ? 'active' : ''}" data-layer-id="${safeId}">
           <span class="layer-name">${escapeHtmlAttr(el.dataset.layerName || 'Layer')}</span>
           <span class="layer-reorder">
-            <button class="icon-btn" title="${hidden ? 'Show layer' : 'Hide layer'}" data-layer-visibility="${el.id}">${eye}</button>
-            <button class="icon-btn" title="Delete layer" data-layer-delete="${el.id}">×</button>
+            <button class="icon-btn" title="${hidden ? 'Show layer' : 'Hide layer'}" data-layer-visibility="${safeId}">${eye}</button>
+            <button class="icon-btn" title="Delete layer" data-layer-delete="${safeId}">×</button>
           </span>
         </div>`;
       });
@@ -1947,8 +1948,14 @@
       if (html.length > 20 * 1024 * 1024) throw new Error('Board too large');
       // strip scripts, inline event handlers, javascript: URLs
       let out = html.replace(/<script[\s\S]*?<\/script\s*>/gi, '');
+      // strip dangerous embedded elements entirely (boards only need div/img/text/svg)
+      out = out.replace(/<(iframe|object|embed|form|meta|link|style|base|title)[\s\S]*?<\/\1\s*>/gi, '');
+      out = out.replace(/<(iframe|object|embed|form|meta|link|style|base)\b[^>]*\/?>/gi, '');
       out = out.replace(/\s+on[a-zA-Z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/g, '');
       out = out.replace(/(href|src|xlink:href)\s*=\s*("|')\s*javascript:[^"']*\2/gi, '$1=$2#$2');
+      // block data:text/html payloads and srcdoc (XSS via embedded HTML)
+      out = out.replace(/(href|src)\s*=\s*("|')\s*data:text\/html[^"']*\2/gi, '$1=$2#$2');
+      out = out.replace(/\ssrcdoc\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
       return out;
     }
     function snapshotBoard() {
@@ -1971,6 +1978,13 @@
         let html = '';
         try { html = sanitizeBoardHTML(snap.html || ''); } catch (e) { html = ''; }
         UI.elements.innerHTML = html;
+        // normalize imported IDs: only safe pattern kept, rest get fresh el- IDs
+        // (prevents attribute-breakout via data-layer-id + duplicate-ID bugs)
+        UI.elements.querySelectorAll('[id]').forEach(function (n) {
+          if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(n.id || '')) {
+            try { n.id = 'el-' + createId(); } catch (e) { n.removeAttribute('id'); }
+          }
+        });
         drawingDataURL = snap.drawing || null;
         const ctx = UI.ctx;
         ctx.clearRect(0, 0, UI.canvas.width, UI.canvas.height);
