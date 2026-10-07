@@ -14,6 +14,7 @@
       selectedIds: [],
       isCropping: false,
       drawShape: 'pen', // 'pen', 'rect', 'circle', 'line'
+      penType: 'pen', // 'pen' | 'marker' | 'highlighter' | 'fountain' | 'neon'
       drawStart: null,
       selectedSpecialLayer: null,
       isDrawing: false,
@@ -1002,53 +1003,146 @@
       s.svg.setAttribute('viewBox', `0 0 ${w.toFixed(2)} ${h.toFixed(2)}`);
       s.path.setAttribute('d', strokePathD(pts.map(p => ({ x: p.x - minX, y: p.y - minY }))));
     }
-    function beginSmoothStroke(x, y) {
+    function beginSmoothStroke(x, y, pressure) {
       const svgNS = 'http://www.w3.org/2000/svg';
+      const def = penTypeDef(state.penType);
       const color = brushColor(), size = brushBaseSize(), zoom = state.zoom;
-      const lw = size / zoom;
+      const lw = (size * def.widthMul) / zoom;
       const el = document.createElement('div');
       el.id = 'el-' + createId();
       el.className = 'board-item';
       el.style.pointerEvents = 'none';
+      el.dataset.penType = state.penType;
       const svg = document.createElementNS(svgNS, 'svg');
       svg.setAttribute('class', 'vibey-stroke');
       svg.setAttribute('xmlns', svgNS);
       svg.setAttribute('preserveAspectRatio', 'none');
       const path = document.createElementNS(svgNS, 'path');
-      path.setAttribute('fill', 'none');
-      path.setAttribute('stroke', color);
-      path.setAttribute('stroke-width', lw.toFixed(2));
-      path.setAttribute('stroke-linecap', 'round');
-      path.setAttribute('stroke-linejoin', 'round');
+      if (def.kind === 'ribbon') {
+        path.setAttribute('fill', color);
+        path.setAttribute('fill-opacity', String(def.opacity));
+        path.setAttribute('stroke', color);
+        path.setAttribute('stroke-width', '0.75');
+      } else {
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', color);
+        path.setAttribute('stroke-width', lw.toFixed(2));
+        path.setAttribute('stroke-linecap', def.cap);
+        path.setAttribute('stroke-linejoin', 'round');
+        path.setAttribute('stroke-opacity', String(def.opacity));
+        if (def.glow) {
+          try { path.style.filter = 'drop-shadow(0 0 ' + Math.max(4, lw * 1.5).toFixed(1) + 'px ' + color + ')'; } catch (e) {}
+        }
+      }
       svg.appendChild(path);
       el.appendChild(svg);
       UI.elements.appendChild(el);
-      activeStroke = { el, svg, path, pts: [{ x, y }], smooth: { x, y }, color, size, zoom, lw, moved: false };
-      layoutLiveStroke(activeStroke, activeStroke.pts);
+      activeStroke = {
+        el, svg, path, pts: [], queue: [{ x, y, p: pressure }],
+        smooth: { x, y }, color, size, zoom, lw, moved: false,
+        penType: state.penType, def, raf: 0, d: '',
+        minX: x, minY: y, maxX: x, maxY: y, width: 0,
+      };
+      pumpStroke(activeStroke);
     }
-    function pushSmoothPoint(x, y) {
+    function scheduleStrokePump(s) {
+      if (s.raf) return;
+      try {
+        s.raf = requestAnimationFrame(() => { s.raf = 0; pumpStroke(s); });
+      } catch (e) { pumpStroke(s); }
+    }
+    function pushSmoothPoint(x, y, pressure) {
       const s = activeStroke;
       if (!s) return;
-      s._n = (s._n || 0) + 1;
-      // Stabilization: heavier easing kills hand shake while drawing
-      s.smooth.x += (x - s.smooth.x) * 0.45;
-      s.smooth.y += (y - s.smooth.y) * 0.45;
-      const px = s.smooth.x, py = s.smooth.y;
-      const prev = s.pts[s.pts.length - 1];
-      if (Math.hypot(px - prev.x, py - prev.y) < 1.2 / s.zoom) return; // jitter filter
-      s.pts.push({ x: px, y: py });
-      s.moved = true;
-      if (s._n % 3 === 0 || s.pts.length < 10) layoutLiveStroke(s, s.pts);
-      else {
-        // cheap incremental update: extend path without recomputing bounds
-        try {
-          const last = s.pts[s.pts.length-1];
-          const prev = s.pts[s.pts.length-2];
-          const mx = ((prev.x + last.x)/2).toFixed(2), my = ((prev.y + last.y)/2).toFixed(2);
-          const d = s.path.getAttribute('d') || '';
-          s.path.setAttribute('d', d + ' Q ' + prev.x.toFixed(2) + ' ' + prev.y.toFixed(2) + ' ' + mx + ' ' + my);
-        } catch (e) { layoutLiveStroke(s, s.pts); }
+      // No DOM work here: just queue, render happens once per frame.
+      s.queue.push({ x, y, p: pressure });
+      scheduleStrokePump(s);
+    }
+    function ribbonWidth(s, dist) {
+      // Slow = wide, fast = narrow; stylus pressure widens further.
+      const speedN = Math.min(1, dist / (16 / s.zoom));
+      const pr = (typeof s._lastP === 'number' && s._lastP > 0) ? s._lastP : 1;
+      const target = s.lw * (0.3 + 1.5 * (1 - speedN)) * (0.35 + 0.65 * Math.min(1, pr));
+      s.width += (Math.max(s.lw * 0.22, Math.min(s.lw * 1.9, target)) - s.width) * 0.5;
+      return s.width;
+    }
+    function ribbonPathD(pts, minX, minY) {
+      // Filled variable-width ribbon from centerline pts [{x,y,w}].
+      const n = pts.length;
+      if (n === 0) return '';
+      if (n === 1) {
+        const r = (pts[0].w || 2) / 2;
+        const cx = (pts[0].x - minX).toFixed(2), cy = (pts[0].y - minY).toFixed(2);
+        return 'M ' + (cx - r) + ' ' + cy + ' a ' + r + ' ' + r + ' 0 1 0 ' + (r * 2) + ' 0 a ' + r + ' ' + r + ' 0 1 0 ' + (-r * 2) + ' 0 Z';
       }
+      const L = [], R = [];
+      for (let i = 0; i < n; i++) {
+        const p = pts[i];
+        const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        dx /= len; dy /= len;
+        const hw = (p.w || 2) / 2;
+        L.push({ x: p.x - minX + (-dy) * hw, y: p.y - minY + dx * hw });
+        R.push({ x: p.x - minX - (-dy) * hw, y: p.y - minY - dx * hw });
+      }
+      const f = (v) => v.toFixed(2);
+      let d = 'M ' + f(L[0].x) + ' ' + f(L[0].y);
+      for (let i = 1; i < L.length - 1; i++) {
+        d += ' Q ' + f(L[i].x) + ' ' + f(L[i].y) + ' ' + f((L[i].x + L[i + 1].x) / 2) + ' ' + f((L[i].y + L[i + 1].y) / 2);
+      }
+      if (L.length > 1) d += ' L ' + f(L[L.length - 1].x) + ' ' + f(L[L.length - 1].y);
+      for (let i = R.length - 1; i > 0; i--) {
+        d += ' Q ' + f(R[i].x) + ' ' + f(R[i].y) + ' ' + f((R[i].x + R[i - 1].x) / 2) + ' ' + f((R[i].y + R[i - 1].y) / 2);
+      }
+      d += ' L ' + f(R[0].x) + ' ' + f(R[0].y) + ' Z';
+      return d;
+    }
+    function pumpStroke(s) {
+      if (!s.queue.length) return;
+      const isRibbon = s.def.kind === 'ribbon';
+      let grew = false;
+      const pad = s.lw / 2 + 4;
+      for (const q of s.queue.splice(0)) {
+        if (typeof q.p === 'number' && q.p > 0) s._lastP = q.p;
+        // Light stabilization: responsive (0.65) so the ink stays under the cursor.
+        s.smooth.x += (q.x - s.smooth.x) * 0.65;
+        s.smooth.y += (q.y - s.smooth.y) * 0.65;
+        const px = s.smooth.x, py = s.smooth.y;
+        const prev = s.pts[s.pts.length - 1];
+        const dist = prev ? Math.hypot(px - prev.x, py - prev.y) : Infinity;
+        if (prev && dist < 1.2 / s.zoom) continue; // jitter filter
+        const w = isRibbon ? ribbonWidth(s, prev ? dist : 0) : 0;
+        s.pts.push(isRibbon ? { x: px, y: py, w } : { x: px, y: py });
+        s.moved = true;
+        const m = isRibbon ? w / 2 + 2 : 0;
+        if (px - m < s.minX) { s.minX = px - m; grew = true; }
+        if (py - m < s.minY) { s.minY = py - m; grew = true; }
+        if (px + m > s.maxX) { s.maxX = px + m; grew = true; }
+        if (py + m > s.maxY) { s.maxY = py + m; grew = true; }
+      }
+      if (!s.pts.length) return;
+      const minX = s.minX - pad, minY = s.minY - pad;
+      const w = Math.max(8, s.maxX - minX + pad * 2);
+      const h = Math.max(8, s.maxY - minY + pad * 2);
+      if (grew || !s._laidOut) {
+        s._laidOut = true;
+        s.el.style.left = minX + 'px';
+        s.el.style.top = minY + 'px';
+        s.el.style.width = w + 'px';
+        s.el.style.height = h + 'px';
+        s.svg.setAttribute('viewBox', '0 0 ' + w.toFixed(2) + ' ' + h.toFixed(2));
+        s._ox = minX; s._oy = minY;
+      }
+      // Single path rebuild per frame (not per event) from layout origin.
+      const ox = s._ox, oy = s._oy;
+      if (isRibbon) {
+        s.d = ribbonPathD(s.pts, ox, oy);
+      } else {
+        const rel = s.pts.map(p => ({ x: p.x - ox, y: p.y - oy }));
+        s.d = strokePathD(rel);
+      }
+      s.path.setAttribute('d', s.d);
     }
     function chaikinSmooth(pts) {
       if (pts.length < 3) return pts;
@@ -1085,10 +1179,13 @@
       const s = activeStroke;
       activeStroke = null;
       if (!s) return;
+      try { if (s.raf) cancelAnimationFrame(s.raf); } catch (e) {}
+      s.raf = 0;
+      pumpStroke(s); // flush any points still queued
       const el = s.el;
       el.style.pointerEvents = '';
       if (!s.moved || s.pts.length < 2) {
-        const p = s.pts[0];
+        const p = s.pts[0] || s.smooth;
         const r = s.lw / 2;
         const minX = p.x - r - 1, minY = p.y - r - 1;
         const w = s.lw + 2, h = s.lw + 2;
@@ -1102,13 +1199,34 @@
         c.setAttribute('cy', (p.y - minY).toFixed(2));
         c.setAttribute('r', r.toFixed(2));
         c.setAttribute('fill', s.color);
+        if (s.def.kind !== 'ribbon') c.setAttribute('fill-opacity', String(s.def.opacity));
+        if (s.def.glow) {
+          try { c.style.filter = 'drop-shadow(0 0 ' + Math.max(4, s.lw * 1.5).toFixed(1) + 'px ' + s.color + ')'; } catch (e) {}
+        }
         s.path.remove();
         s.svg.appendChild(c);
+      } else if (s.def.kind === 'ribbon') {
+        // Fountain keeps its live variable-width ribbon (beautify would flatten widths).
+        // Final layout must include ribbon half-widths or edges get clipped.
+        const pad = s.lw / 2 + 4;
+        let fMinX = Infinity, fMinY = Infinity, fMaxX = -Infinity, fMaxY = -Infinity;
+        s.pts.forEach(p => {
+          const m = (p.w || 2) / 2 + pad;
+          fMinX = Math.min(fMinX, p.x - m); fMinY = Math.min(fMinY, p.y - m);
+          fMaxX = Math.max(fMaxX, p.x + m); fMaxY = Math.max(fMaxY, p.y + m);
+        });
+        const fw = Math.max(8, fMaxX - fMinX), fh = Math.max(8, fMaxY - fMinY);
+        el.style.left = fMinX + 'px';
+        el.style.top = fMinY + 'px';
+        el.style.width = fw + 'px';
+        el.style.height = fh + 'px';
+        s.svg.setAttribute('viewBox', '0 0 ' + fw.toFixed(2) + ' ' + fh.toFixed(2));
+        s.path.setAttribute('d', ribbonPathD(s.pts, fMinX, fMinY));
       } else {
         layoutLiveStroke(s, beautifyStroke(s.pts, s.zoom));
       }
       el.dataset.layerType = 'stroke';
-      el.dataset.layerName = createLayerName('stroke');
+      el.dataset.layerName = (s.def.label || 'Pen') + ' stroke';
       const resizer = document.createElement('div');
       resizer.className = 'resizer';
       el.appendChild(resizer);
@@ -1469,7 +1587,7 @@
       const eraserMode = state.tool === 'eraser';
       if (!penMode && !eraserMode) return;
       const el = ensureBrushCursor();
-      const d = Math.max(8, eraserMode ? brushBaseSize() * 2 : brushBaseSize());
+      const d = Math.max(8, eraserMode ? brushBaseSize() * 2 : brushBaseSize() * penWidthMul(state.penType));
       el.style.display = 'block';
       el.style.width = d + 'px';
       el.style.height = d + 'px';
@@ -1606,7 +1724,7 @@
       } else if (state.tool === 'draw') {
         state.isDrawing = true;
         state.drawStart = { x, y };
-        if (state.drawShape === 'pen') beginSmoothStroke(x, y);
+        if (state.drawShape === 'pen') beginSmoothStroke(x, y, e.pressure);
         else setupBrushCtx();
       }
     });
@@ -1627,21 +1745,22 @@
       }
     });
 
-    // High-frequency pen path: coalesced events = no gaps on fast moves
+    // High-frequency pen path: coalesced events = no gaps on fast moves.
+    // Points are only queued here; DOM writes happen once per frame in pumpStroke.
     UI.board.addEventListener('pointermove', (e) => {
       if (!state.isDrawing || state.tool !== 'draw' || state.drawShape !== 'pen' || !activeStroke) return;
       let pts = null;
       try {
         if (typeof e.getCoalescedEvents === 'function') {
           const evts = e.getCoalescedEvents();
-          if (evts && evts.length > 1) pts = evts.map(ev => screenToBoard(ev.clientX, ev.clientY));
+          if (evts && evts.length > 1) pts = evts.map(ev => Object.assign(screenToBoard(ev.clientX, ev.clientY), { pr: ev.pressure }));
         }
       } catch (_) { /* fallback below */ }
       if (!pts) {
         const { x, y } = screenToBoard(e.clientX, e.clientY);
-        pts = [{ x, y }];
+        pts = [{ x, y, pr: e.pressure }];
       }
-      for (const p of pts) pushSmoothPoint(p.x, p.y);
+      for (const p of pts) pushSmoothPoint(p.x, p.y, p.pr);
     });
     UI.board.addEventListener('mouseleave', () => {
       if (brushCursorEl) brushCursorEl.style.display = 'none';
@@ -2089,6 +2208,24 @@
       }
     }
     const SHAPE_NAMES = { pen: 'Pen', line: 'Line', arrow: 'Arrow', elbow: 'Elbow arrow', block: 'Block arrow', rect: 'Rectangle', oval: 'Oval', rhombus: 'Rhombus', triangle: 'Triangle', tridown: 'Inverted triangle', cylinder: 'Cylinder', divider: 'Divider', circle: 'Circle' };
+    // ── Pen types: width multiplier / opacity / cap / extras ──
+    const PEN_TYPES = {
+      pen:         { label: 'Pen',         widthMul: 1,   opacity: 1,    cap: 'round', kind: 'stroke' },
+      marker:      { label: 'Marker',      widthMul: 2.1, opacity: 0.9,  cap: 'round', kind: 'stroke' },
+      highlighter: { label: 'Highlighter', widthMul: 4.5, opacity: 0.35, cap: 'round', kind: 'stroke' },
+      fountain:    { label: 'Fountain',    widthMul: 1,   opacity: 1,    cap: 'round', kind: 'ribbon' },
+      neon:        { label: 'Neon',        widthMul: 1.7, opacity: 1,    cap: 'round', kind: 'stroke', glow: true },
+    };
+    function penTypeDef(t) { return PEN_TYPES[t] || PEN_TYPES.pen; }
+    function penWidthMul(t) { return penTypeDef(t).widthMul; }
+    function setPenType(t) {
+      if (!PEN_TYPES[t]) return;
+      state.penType = t;
+      try { localStorage.setItem('vibeyPenType', t); } catch (e) {}
+      document.querySelectorAll('.pen-type').forEach(b => b.classList.toggle('active', b.dataset.penType === t));
+      syncPenPopover();
+      showToast(PEN_TYPES[t].label + ' pen');
+    }
     function syncPenPopover() {
       const pp = document.getElementById('penPopover');
       if (!pp) return;
@@ -2098,6 +2235,7 @@
         document.getElementById('penSize').value = document.getElementById('brushSize').value;
         const cur = (document.getElementById('brushColor').value || '').toLowerCase();
         document.querySelectorAll('.pen-swatch').forEach(s => s.classList.toggle('active', s.dataset.color.toLowerCase() === cur));
+        document.querySelectorAll('.pen-type').forEach(b => b.classList.toggle('active', b.dataset.penType === state.penType));
       }
       const dot = document.getElementById('shapePenDotColor');
       if (dot) dot.style.background = document.getElementById('brushColor').value || '#8b89ff';
@@ -3348,6 +3486,11 @@
       else if (k === 'r') setDrawShape('rect');
       else if (k === 'c') setDrawShape('circle');
       else if (k === 'o') setDrawShape('oval');
+      else if (k === '1') setPenType('pen');
+      else if (k === '2') setPenType('marker');
+      else if (k === '3') setPenType('highlighter');
+      else if (k === '4') setPenType('fountain');
+      else if (k === '5') setPenType('neon');
       else if (k === '?') toggleShortcuts();
       else if (k === 'g') {
         state.gridSnap = !state.gridSnap;
@@ -3543,6 +3686,9 @@
       UI.ctx.strokeStyle = c;
       document.querySelectorAll('.pen-swatch').forEach(s => s.classList.toggle('active', s === sw));
     }));
+    document.querySelectorAll('.pen-type').forEach(btn => btn.addEventListener('click', () => {
+      setPenType(btn.dataset.penType);
+    }));
     document.getElementById('penSize').addEventListener('input', (e) => {
       document.getElementById('brushSize').value = e.target.value;
       UI.ctx.lineWidth = e.target.value / state.zoom;
@@ -3562,6 +3708,14 @@
     });
     applyTransform();
     document.body.classList.add('tool-select');
+    // Restore saved pen type silently (no toast on load).
+    try {
+      const savedPen = localStorage.getItem('vibeyPenType');
+      if (savedPen && PEN_TYPES[savedPen]) {
+        state.penType = savedPen;
+        document.querySelectorAll('.pen-type').forEach(b => b.classList.toggle('active', b.dataset.penType === savedPen));
+      }
+    } catch (e) {}
     selectElement(null);
     try { loadAutosave(); } catch (e) {}
     // push initial history AFTER load attempt settles (avoid overwriting saved board with empty)
